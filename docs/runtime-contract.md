@@ -31,7 +31,7 @@ Asset filenames remain stable across releases. The release tag supplies the vers
 | --- | --- | --- |
 | `win-x86` | `win32-x64`, `win32-arm64` | Implemented. ARM64 uses x64 emulation. |
 | `macos-x86` | `darwin-x64` | Reserved for platform bring-up. |
-| `macos-arm64` | `darwin-arm64` | Reserved for platform bring-up. |
+| `macos-arm64` | `darwin-arm64` | Implemented as a native Apple Silicon payload. |
 | `linux-x86` | `linux-x64` | Reserved for platform bring-up. |
 | `linux-arm64` | `linux-arm64` | Reserved for platform bring-up. |
 
@@ -118,7 +118,8 @@ Do not mutate global `process.env` as the integration mechanism. Construct a per
 
 - Shallow verification checks the manifest and required paths.
 - Deep verification recomputes payload file count and unpacked bytes before and after executable probes.
-- Executable verification launches Node and Python, imports the Python document stack, imports `@oai/artifact-tool` through the resolver, checks Git, checks managed LibreOffice, and performs a real HTML-to-PDF conversion.
+- Executable verification launches Node, Python, and pnpm; imports the Python document stack, `@oai/artifact-tool`, and the public managed Node packages; checks Git, Poppler, and libheif; and performs a real HTML-to-PDF conversion.
+- macOS executable verification also confirms the required Mach-O architecture and validates LibreOffice's nested Developer ID signatures after relocation.
 
 A release requires all three on the target host.
 

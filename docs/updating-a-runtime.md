@@ -80,6 +80,8 @@ bun run stage -- `
 
 Review the staged `payloads/<asset>/runtime.json`. Confirm that every component strategy and source is truthful.
 
+Staging validates every symlink before writing the manifest. Absolute upstream links are rewritten only when their intended sibling target exists inside the payload; broken, ambiguous, or escaping links fail the build.
+
 ## 5. Verify the staged payload
 
 ```powershell

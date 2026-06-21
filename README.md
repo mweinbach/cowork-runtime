@@ -25,7 +25,7 @@ Each release uses an ISO-date version and a stable asset name:
 | Windows x64 | `cowork-runtime-win-x86.zip` | The `x86` asset label means the x86-64 compatibility payload. |
 | Windows ARM64 | `cowork-runtime-win-x86.zip` | Runs through Windows x64 emulation for now. |
 | macOS x64 | `cowork-runtime-macos-x86.zip` | Payload to be assembled later. |
-| macOS ARM64 | `cowork-runtime-macos-arm64.zip` | Payload to be assembled later. |
+| macOS ARM64 | `cowork-runtime-macos-arm64.zip` | Native Apple Silicon payload. |
 | Linux x64 | `cowork-runtime-linux-x86.zip` | Payload to be assembled later. |
 | Linux ARM64 | `cowork-runtime-linux-arm64.zip` | Payload to be assembled later. |
 
@@ -41,9 +41,9 @@ Installation is checksum-verified, extracted into a temporary directory, validat
 
 ## Component policy
 
-The runtime is assembled from components rather than blindly cloning an upstream directory. [`runtime-components.json`](runtime-components.json) is the source of truth.
+The runtime is assembled from components rather than blindly cloning an upstream directory. [`runtime-components.json`](runtime-components.json) is the shared default, and a platform recipe may provide a narrower component plan.
 
-Current Windows bootstrap:
+Current bootstrap:
 
 | Component | Current strategy | Intended direction |
 | --- | --- | --- |
@@ -59,7 +59,7 @@ Current Windows bootstrap:
 
 Every installed `runtime.json` records the strategy, path, and provenance of each component. Replacing a copied component with a reproducible builder does not change archive names or the harness integration contract.
 
-The first extracted public dependency recipes live under [`recipes/win-x86`](recipes/win-x86/README.md). They deliberately keep `@oai/artifact-tool` and `artifact_tool_v2` outside the public build recipe as supplied inputs.
+Extracted public dependency recipes live under [`recipes/win-x86`](recipes/win-x86/README.md) and [`recipes/macos-arm64`](recipes/macos-arm64/README.md). They deliberately keep `@oai/artifact-tool` and `artifact_tool_v2` outside the public build recipe as supplied inputs.
 
 Large payloads are intentionally ignored by Git. `payloads/` is local staging and `dist/` contains release assets.
 
@@ -105,6 +105,27 @@ dist/cowork-runtime-win-x86.zip
 dist/cowork-runtime-win-x86.zip.sha256
 ```
 
+## Build the macOS ARM64 payload
+
+Build on Apple Silicon using the native `darwin-arm64` reference runtime. The platform-specific plan excludes the reference runtime's duplicate LibreOfficeDev tree and packages the checksum-pinned official app instead:
+
+```bash
+bun install --frozen-lockfile
+bun run prepare:libreoffice -- --asset macos-arm64 --force
+bun run stage -- \
+  --source "$HOME/.cache/codex-runtimes/codex-primary-runtime" \
+  --asset macos-arm64 \
+  --version 2026-06-21 \
+  --component-plan recipes/macos-arm64/runtime-components.json \
+  --force
+bun run verify -- --runtime payloads/macos-arm64 --deep --execute
+bun run build -- --runtime payloads/macos-arm64 --asset macos-arm64
+```
+
+The executable verification imports the managed Node and Python stacks, checks pnpm, Git, Poppler and libheif, confirms native Mach-O architecture, completes a real LibreOffice conversion, and validates the app's Developer ID seal. Staging also rejects broken or escaping symlinks and safely normalizes relocatable sibling links from upstream payloads.
+
+The build creates `dist/cowork-runtime-macos-arm64.zip` and its `.sha256` sidecar.
+
 ## Test the installer locally
 
 Use a temporary home first:
@@ -122,6 +143,8 @@ bun src/cli.ts verify `
 ```
 
 Install to the real Cowork home by omitting `--home`.
+
+On macOS, use an isolated home such as `$TMPDIR/cowork-runtime-smoke` and the `cowork-runtime-macos-arm64` asset names, then run the same deep executable verification against its installed `2026-06-21` directory.
 
 ## Publish a GitHub release
 
