@@ -274,8 +274,11 @@ async function generateRuntimeLaunchers(
   for (const [name, candidates] of [
     ["pdfinfo", ["../native/poppler/bin/pdfinfo", "../native/poppler/Library/bin/pdfinfo"]],
     ["pdftoppm", ["../native/poppler/bin/pdftoppm", "../native/poppler/Library/bin/pdftoppm"]],
-    ["heif-convert", ["../native/libheif/bin/heif-convert"]],
-    ["JxrDecApp", ["../native/jxrlib/bin/JxrDecApp"]],
+    [
+      "heif-convert",
+      ["../native/libheif/libheif/bin/heif-convert", "../native/libheif/bin/heif-convert"],
+    ],
+    ["JxrDecApp", ["../native/jxrlib/jxrlib/bin/JxrDecApp", "../native/jxrlib/bin/JxrDecApp"]],
   ] as const) {
     const target = await (async () => {
       for (const candidate of candidates) {

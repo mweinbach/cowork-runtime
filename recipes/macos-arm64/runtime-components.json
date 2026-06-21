@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "components": [
+    {
+      "id": "node-environment",
+      "strategy": "copied",
+      "source": "dependencies/node",
+      "destination": "dependencies/node",
+      "note": "Copies the pinned native Apple Silicon Node binary, public package tree, and supplied @oai/artifact-tool package from the reference runtime."
+    },
+    {
+      "id": "python-environment",
+      "strategy": "copied",
+      "source": "dependencies/python",
+      "destination": "dependencies/python",
+      "note": "Copies the pinned native Apple Silicon Python environment and supplied artifact_tool_v2 package from the reference runtime."
+    },
+    {
+      "id": "native-git",
+      "strategy": "copied",
+      "source": "dependencies/native/git",
+      "destination": "dependencies/native/git"
+    },
+    {
+      "id": "native-poppler",
+      "strategy": "copied",
+      "source": "dependencies/native/poppler",
+      "destination": "dependencies/native/poppler"
+    },
+    {
+      "id": "native-libheif",
+      "strategy": "copied",
+      "source": "dependencies/native/libheif",
+      "destination": "dependencies/native/libheif"
+    },
+    {
+      "id": "native-jxrlib",
+      "strategy": "copied",
+      "source": "dependencies/native/jxrlib",
+      "destination": "dependencies/native/jxrlib"
+    },
+    {
+      "id": "libreoffice-headless",
+      "strategy": "copied",
+      "sourceBase": "component-input",
+      "source": "libreoffice",
+      "destination": "dependencies/libreoffice",
+      "note": "Uses the checksum-pinned official Apple Silicon LibreOffice app and excludes the reference runtime's duplicate LibreOfficeDev payload."
+    },
+    {
+      "id": "node-module-resolver",
+      "strategy": "built",
+      "destination": "cowork/node-resolver"
+    },
+    {
+      "id": "headless-soffice-launcher",
+      "strategy": "built",
+      "destination": "cowork/headless-soffice"
+    },
+    {
+      "id": "runtime-launchers",
+      "strategy": "generated",
+      "destination": "dependencies/bin"
+    },
+    {
+      "id": "source-provenance",
+      "strategy": "generated",
+      "destination": "provenance/codex-primary-runtime.json"
+    }
+  ]
+}

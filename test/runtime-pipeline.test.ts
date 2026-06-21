@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 
 import { buildRuntimeArchive } from "../src/archive";
 import {
@@ -13,6 +15,7 @@ import { readRuntimeManifest } from "../src/manifest";
 import { buildRuntimeEnv, stageRuntime, verifyRuntime } from "../src/runtime";
 
 const temporaryRoots: string[] = [];
+const execFileAsync = promisify(execFile);
 
 async function tempRoot(label: string): Promise<string> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), `cowork-runtime-${label}-`));
@@ -24,6 +27,16 @@ async function writeFile(root: string, relative: string, content = "fixture"): P
   const destination = path.join(root, ...relative.split("/"));
   await fs.mkdir(path.dirname(destination), { recursive: true });
   await fs.writeFile(destination, content);
+}
+
+async function writeExecutable(
+  root: string,
+  relative: string,
+  content = "#!/bin/sh\nprintf 'fixture\\n'\n",
+): Promise<void> {
+  const destination = path.join(root, ...relative.split("/"));
+  await writeFile(root, relative, content);
+  await fs.chmod(destination, 0o755);
 }
 
 async function fakeSourceRuntime(root: string): Promise<void> {
@@ -75,6 +88,77 @@ async function fakeLibreOfficeInput(root: string): Promise<{
   return { componentInputDir, windowsSofficeShimPath };
 }
 
+async function fakeMacSourceRuntime(root: string): Promise<void> {
+  await writeFile(
+    root,
+    "runtime.json",
+    `${JSON.stringify(
+      {
+        bundleFormatVersion: 2,
+        bundleVersion: "fixture.macos-arm64.1",
+        nodeVersion: "v24.14.0",
+        pythonVersion: "3.12.13",
+        pnpmVersion: "11.5.3",
+        targetPlatform: "darwin",
+        targetArch: "arm64",
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  await writeExecutable(
+    root,
+    "dependencies/node/bin/node",
+    "#!/bin/sh\nprintf 'node:%s\\n' \"$*\"\n",
+  );
+  await writeFile(root, "dependencies/node/node_modules/pnpm/bin/pnpm.mjs");
+  await writeFile(
+    root,
+    "dependencies/node/node_modules/@oai/artifact-tool/package.json",
+    '{"name":"@oai/artifact-tool","version":"2.8.13"}\n',
+  );
+  await writeExecutable(root, "dependencies/python/bin/python3");
+  await writeExecutable(root, "dependencies/native/git/bin/git");
+  await writeExecutable(
+    root,
+    "dependencies/native/poppler/bin/pdfinfo",
+    "#!/bin/sh\nprintf 'pdfinfo:%s\\n' \"$*\"\n",
+  );
+  await writeExecutable(root, "dependencies/native/poppler/bin/pdftoppm");
+  await writeExecutable(
+    root,
+    "dependencies/native/libheif/libheif/bin/heif-dec",
+    "#!/bin/sh\nprintf 'heif:%s\\n' \"$*\"\n",
+  );
+  await fs.symlink(
+    "heif-dec",
+    path.join(root, "dependencies", "native", "libheif", "libheif", "bin", "heif-convert"),
+  );
+  await writeExecutable(
+    root,
+    "dependencies/native/jxrlib/jxrlib/bin/JxrDecApp",
+    "#!/bin/sh\nprintf 'jxr:%s\\n' \"$*\"\n",
+  );
+  await writeFile(
+    root,
+    "dependencies/native/libreoffice-headless/libreoffice/LibreOfficeDev.app/duplicate",
+  );
+}
+
+async function fakeMacLibreOfficeInput(root: string): Promise<{ componentInputDir: string }> {
+  const componentInputDir = path.join(root, "component-input");
+  await writeExecutable(
+    componentInputDir,
+    "libreoffice/LibreOffice.app/Contents/MacOS/soffice",
+  );
+  await writeFile(
+    componentInputDir,
+    "libreoffice/cowork-libreoffice.json",
+    '{"schemaVersion":1,"version":"26.2.3","asset":"macos-arm64"}\n',
+  );
+  return { componentInputDir };
+}
+
 afterEach(async () => {
   await Promise.all(
     temporaryRoots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true })),
@@ -82,6 +166,92 @@ afterEach(async () => {
 });
 
 describe("unified runtime pipeline", () => {
+  test("round-trips relocatable macOS ARM64 launchers and symlinks", async () => {
+    if (process.platform === "win32") return;
+
+    const root = await tempRoot("macos-arm64");
+    const source = path.join(root, "source");
+    const staged = path.join(root, "payloads", "macos-arm64");
+    const archive = path.join(root, "dist", "cowork-runtime-macos-arm64.zip");
+    const home = path.join(root, "home");
+    await fakeMacSourceRuntime(source);
+    const libreOffice = await fakeMacLibreOfficeInput(root);
+
+    const manifest = await stageRuntime({
+      sourceDir: source,
+      destinationDir: staged,
+      asset: "macos-arm64",
+      version: "2026-06-21",
+      createdAt: "2026-06-21T00:00:00.000Z",
+      componentPlanPath: path.resolve("recipes/macos-arm64/runtime-components.json"),
+      ...libreOffice,
+    });
+    expect(manifest.paths).toMatchObject({
+      node: "dependencies/node/bin/node",
+      python: "dependencies/python/bin/python3",
+      pnpm: "dependencies/bin/pnpm",
+      git: "dependencies/native/git/bin/git",
+      pdfinfo: "dependencies/bin/pdfinfo",
+      pdftoppm: "dependencies/bin/pdftoppm",
+      popplerBin: "dependencies/native/poppler/bin",
+      soffice: "dependencies/bin/soffice",
+      libreOfficeBinary: "dependencies/libreoffice/LibreOffice.app/Contents/MacOS/soffice",
+    });
+    expect(manifest.components.map((component) => component.id)).not.toContain(
+      "source-libreoffice-headless",
+    );
+    await expect(
+      fs.stat(path.join(staged, "dependencies", "native", "libreoffice-headless")),
+    ).rejects.toThrow();
+    for (const launcher of [
+      "pnpm",
+      "pdfinfo",
+      "pdftoppm",
+      "heif-convert",
+      "JxrDecApp",
+      "soffice",
+    ]) {
+      const stat = await fs.stat(path.join(staged, "dependencies", "bin", launcher));
+      expect(stat.mode & 0o111).not.toBe(0);
+    }
+    expect(await fs.readFile(path.join(staged, "dependencies", "bin", "heif-convert"), "utf8"))
+      .toContain("../native/libheif/libheif/bin/heif-convert");
+    expect(await fs.readFile(path.join(staged, "dependencies", "bin", "JxrDecApp"), "utf8"))
+      .toContain("../native/jxrlib/jxrlib/bin/JxrDecApp");
+
+    const built = await buildRuntimeArchive({ runtimeDir: staged, outputFile: archive });
+    const installed = await installRuntimeArchive({
+      archivePath: built.archivePath,
+      expectedSha256: built.sha256,
+      home,
+      host: { platform: "darwin", arch: "arm64" },
+    });
+    const convertedLink = path.join(
+      installed.runtimeDir,
+      "dependencies",
+      "native",
+      "libheif",
+      "libheif",
+      "bin",
+      "heif-convert",
+    );
+    expect((await fs.lstat(convertedLink)).isSymbolicLink()).toBe(true);
+    expect(await fs.readlink(convertedLink)).toBe("heif-dec");
+
+    const bin = path.join(installed.runtimeDir, "dependencies", "bin");
+    expect((await execFileAsync(path.join(bin, "pdfinfo"), ["--version"])).stdout.trim()).toBe(
+      "pdfinfo:--version",
+    );
+    expect((await execFileAsync(path.join(bin, "heif-convert"), ["input.heic"])).stdout.trim())
+      .toBe("heif:input.heic");
+    expect((await execFileAsync(path.join(bin, "JxrDecApp"), ["input.jxr"])).stdout.trim()).toBe(
+      "jxr:input.jxr",
+    );
+    expect((await execFileAsync(path.join(bin, "pnpm"), ["--version"])).stdout.trim()).toContain(
+      "pnpm.mjs --version",
+    );
+  });
+
   test("stages components, builds a release, and installs by date", async () => {
     const root = await tempRoot("pipeline");
     const source = path.join(root, "source");

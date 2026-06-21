@@ -1,0 +1,34 @@
+# Public packages in the 2026-06-21 macOS ARM64 reference payload.
+# artifact_tool_v2 is intentionally excluded: it is a supplied/private input.
+annotated-types==0.7.0
+cffi==2.0.0
+charset-normalizer==3.4.7
+cryptography==49.0.0
+et_xmlfile==2.0.0
+lxml==6.0.2
+numpy==2.3.5
+openpyxl==3.1.5
+packaging==26.2
+pandas==2.2.3
+pdf2image==1.17.0
+pdfminer.six==20251230
+pdfplumber==0.11.9
+pillow==12.2.0
+pycparser==3.0
+pydantic==2.13.4
+pydantic_core==2.46.4
+pyhumps==3.8.0
+pypdf==6.10.0
+pypdfium2==5.9.0
+python-dateutil==2.9.0.post0
+python-docx==1.2.0
+python-pptx==1.0.2
+pytz==2026.2
+reportlab==4.4.9
+setuptools==82.0.1
+six==1.17.0
+typing-inspection==0.4.2
+typing_extensions==4.15.0
+tzdata==2026.2
+wheel==0.47.0
+xlsxwriter==3.2.9
