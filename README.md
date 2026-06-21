@@ -1,8 +1,8 @@
 # Cowork Runtime
 
-Cowork Runtime packages the platform-specific tools and productivity plugins used by the Cowork harness into one versioned release artifact.
+Cowork Runtime packages the platform-specific tools and libraries used by the Cowork harness into one versioned release artifact.
 
-The application itself still runs on Bun. This runtime is the managed execution layer for artifact work: Node, Python, public package dependencies, native utilities, and the document/PDF/presentation/spreadsheet plugins.
+The application itself still runs on Bun. This runtime is the managed execution layer for artifact work: Node, Python, package dependencies, and native utilities. Skills and plugins are separate application downloads from the Cowork skills marketplace and are never bundled into this archive.
 
 ## Maintainer guides
 
@@ -54,11 +54,12 @@ Current Windows bootstrap:
 | Python executable and packages | Copied from the pinned reference payload | Assemble from portable Python and a hashed requirements lock |
 | Git, Poppler, libheif, jxrlib | Copied from the pinned reference payload | Fetch or compile from pinned upstream releases per platform |
 | `@oai/artifact-tool` | Direct copy | Remains a supplied release input unless build inputs become available |
-| Productivity plugins | Direct copy | Remain supplied release inputs |
+| LibreOffice conversion engine | Official binary, checksum-pinned and normalized here | Keep full filter/render compatibility while exposing no interactive launcher |
+| Headless `soffice` policy launcher | Built here; Windows uses a tiny Rust shim | Cowork-owned |
 
 Every installed `runtime.json` records the strategy, path, and provenance of each component. Replacing a copied component with a reproducible builder does not change archive names or the harness integration contract.
 
-The first extracted public dependency recipes live under [`recipes/win-x86`](recipes/win-x86/README.md). They deliberately keep `@oai/artifact-tool`, `artifact_tool_v2`, and curated plugins outside the public build recipe as supplied inputs.
+The first extracted public dependency recipes live under [`recipes/win-x86`](recipes/win-x86/README.md). They deliberately keep `@oai/artifact-tool` and `artifact_tool_v2` outside the public build recipe as supplied inputs.
 
 Large payloads are intentionally ignored by Git. `payloads/` is local staging and `dist/` contains release assets.
 
@@ -68,6 +69,12 @@ Install the small builder dependencies:
 
 ```powershell
 bun install
+```
+
+Prepare the checksum-pinned LibreOffice component on the target operating system. Windows release builders also need a Rust toolchain for the small native `soffice.exe` forwarding shim:
+
+```powershell
+bun run prepare:libreoffice -- --asset win-x86 --force
 ```
 
 Assemble from the current OpenAI reference runtime:
@@ -81,6 +88,8 @@ bun run stage -- `
 ```
 
 This copies only the components marked `copied`, builds the Cowork-owned support layer, generates launchers, preserves the original source manifest under `provenance/`, and writes the canonical Cowork `runtime.json`.
+
+No source skill or plugin tree is copied. Marketplace skills consume this runtime through the environment contract below; the marketplace owns their instructions and helper scripts.
 
 Build and verify the release:
 
@@ -158,10 +167,39 @@ COWORK_RUNTIME_NODE
 COWORK_RUNTIME_PYTHON
 COWORK_RUNTIME_NODE_MODULES
 COWORK_RUNTIME_NODE_RESOLVER
-COWORK_RUNTIME_PLUGINS_DIR
+COWORK_RUNTIME_POPPLER_BIN
+COWORK_RUNTIME_SOFFICE
+COWORK_RUNTIME_LIBREOFFICE_DIR
+COWORK_RUNTIME_LIBREOFFICE_BINARY
 ```
 
-It also prepares `PATH`, `NODE_PATH`, and a Node `--import` resolver hook so builders in writable scratch directories can directly import managed packages such as `@oai/artifact-tool`.
+It also prepares `PATH`, `NODE_PATH`, and a Node `--import` resolver hook so marketplace skill builders in writable scratch directories can directly import managed packages such as `@oai/artifact-tool`.
+
+## Skills marketplace boundary
+
+The runtime and skills have independent release lifecycles:
+
+- the app downloads this platform runtime into `~/.cowork/runtime/<date>`;
+- the app downloads authoritative plugins and skills from the Cowork skills marketplace into the normal project or user plugin roots;
+- plugin discovery never scans the runtime directory;
+- updating the runtime cannot replace skill content, and updating a skill cannot replace runtime binaries.
+
+Marketplace helpers that need package locations use `COWORK_RUNTIME_NODE_MODULES`; they must not reach into a Codex cache or assume a mutable compatibility directory.
+
+## LibreOffice and `soffice`
+
+The OAI reference payload does not carry LibreOffice, so Cowork adds it as a separate, checksum-pinned component input while still publishing one unified runtime ZIP. [`libreoffice-sources.json`](libreoffice-sources.json) pins the official platform archives and hashes.
+
+Only Cowork's launcher under `dependencies/bin` is placed on `PATH`. The private LibreOffice program directory is never exposed. The launcher:
+
+- rejects UI, quick-start, view, and printer command-line modes;
+- always forces headless, invisible, no-logo, no-default, no-restore operation;
+- creates and removes an isolated profile for every invocation;
+- disables synchronous printer detection and profile printer loading;
+- disables document macro execution and system file dialogs;
+- forwards only conversion, text-output, version, and help operations.
+
+On Windows, interactive module launchers such as `soffice.exe`, `swriter.exe`, and `scalc.exe` are removed from the packaged engine. `soffice.com` and `soffice.bin` remain private because they are required for the conversion engine. Rebuilding a custom LibreOffice fork is deliberately avoided: the official filter/render binaries are the compatibility boundary, while the Cowork launcher provides the no-UI/no-print boundary.
 
 ## Safety properties
 

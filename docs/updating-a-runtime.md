@@ -21,7 +21,6 @@ Check the source manifest and top-level layout:
 ```powershell
 Get-Content "$Source\runtime.json"
 Get-ChildItem "$Source\dependencies"
-Get-ChildItem "$Source\plugins\openai-primary-runtime\plugins"
 ```
 
 Compare at least:
@@ -31,13 +30,12 @@ Compare at least:
 - top-level Node packages and private supplied packages;
 - Python package versions;
 - native tools and their versions;
-- plugin list and plugin manifest versions;
 - new or removed license files;
 - changes to expected entrypoint paths.
 
 Do not patch the source cache in place. Treat it as an immutable input.
 
-Compare `runtime-overlays/plugins/` against the refreshed upstream plugin tree before staging. Review every same-path difference as an intentional Cowork override, retain useful upstream-only files, and remove obsolete Cowork overlays instead of letting them drift silently.
+Confirm the staged payload contains no `plugins/` or skill directories. Skill updates belong in the Cowork skills marketplace and use a separate release/review path.
 
 ## 3. Refresh component recipes
 
@@ -96,7 +94,9 @@ Additionally run entrypoints that are meaningful for the update:
 & "payloads\win-x86\dependencies\bin\pdftoppm.cmd" -v
 ```
 
-For plugin updates, verify each plugin's declared skill files and run a representative artifact task. A documents update should create a DOCX and exercise the render path when LibreOffice is available; presentations and spreadsheets should exercise `@oai/artifact-tool` output.
+After a dependency update, run a representative artifact task using separately installed marketplace skills. A documents task must create a DOCX and exercise the managed headless render path; presentations and spreadsheets should exercise `@oai/artifact-tool` output.
+
+LibreOffice is a required runtime component. Refresh its URL and SHA-256 in `libreoffice-sources.json`, run `prepare-libreoffice` on every target platform, and fail the release if `verify --deep --execute` cannot complete its real PDF conversion.
 
 ## 6. Build the release asset
 

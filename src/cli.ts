@@ -12,6 +12,7 @@ import {
   listInstalledRuntimes,
   resolveCurrentRuntime,
 } from "./install";
+import { prepareLibreOfficeInput } from "./libreoffice";
 import { isRuntimeAssetId, resolveRuntimeAssetForHost, runtimeAssetFileName } from "./platform";
 import { buildRuntimeEnv, stageRuntime, verifyRuntime } from "./runtime";
 
@@ -22,6 +23,7 @@ function usage(): string {
   return `Cowork runtime builder and installer
 
 Commands:
+  prepare-libreoffice  Download, verify, and normalize the private LibreOffice payload
   stage     Assemble a platform payload from a source runtime
   build     Build a ZIP and SHA-256 sidecar from a staged payload
   verify    Verify a staged or installed runtime
@@ -32,6 +34,7 @@ Commands:
   env       Print the current runtime environment as JSON
 
 Examples:
+  bun src/cli.ts prepare-libreoffice --asset win-x86 --force
   bun run stage -- --source C:\\Users\\me\\.cache\\codex-runtimes\\codex-primary-runtime --asset win-x86 --version 2026-06-21 --force
   bun run stage -- --source /runtime --asset linux-x86 --version 2026-06-21 --component-plan recipes/linux-x86/runtime-components.json --force
   bun run build -- --runtime payloads/win-x86
@@ -76,6 +79,21 @@ async function checksumFromFile(checksumPath: string, archivePath: string): Prom
 
 async function main(): Promise<void> {
   switch (command) {
+    case "prepare-libreoffice": {
+      const asset = runtimeAsset();
+      const result = await prepareLibreOfficeInput({
+        asset,
+        ...(option("--output") ? { outputDir: path.resolve(option("--output") as string) } : {}),
+        ...(option("--cache") ? { cacheDir: path.resolve(option("--cache") as string) } : {}),
+        ...(option("--sources")
+          ? { sourcesFile: path.resolve(option("--sources") as string) }
+          : {}),
+        force: flag("--force"),
+        log: console.log,
+      });
+      console.log(JSON.stringify(result, null, 2));
+      return;
+    }
     case "stage": {
       const asset = runtimeAsset();
       const sourceDir = path.resolve(
@@ -94,6 +112,13 @@ async function main(): Promise<void> {
           : {}),
         ...(option("--support-dir")
           ? { supportDir: path.resolve(option("--support-dir") as string) }
+          : {}),
+        ...(option("--component-input")
+          ? { componentInputDir: path.resolve(option("--component-input") as string) }
+          : {}),
+        ...(option("--rustc") ? { rustcPath: path.resolve(option("--rustc") as string) } : {}),
+        ...(option("--soffice-shim")
+          ? { windowsSofficeShimPath: path.resolve(option("--soffice-shim") as string) }
           : {}),
         log: console.log,
       });

@@ -8,7 +8,7 @@ describe("archive path containment", () => {
     expect(normalizeZipEntryName("dependencies/node/bin/node.exe")).toBe(
       "dependencies/node/bin/node.exe",
     );
-    expect(() => assertSafeRelativePath("plugins/openai-primary-runtime")).not.toThrow();
+    expect(() => assertSafeRelativePath("dependencies/node/node_modules")).not.toThrow();
   });
 
   test("rejects traversal, absolute, and Windows separator paths", () => {
@@ -18,4 +18,3 @@ describe("archive path containment", () => {
     expect(() => assertSafeRelativePath("../escape")).toThrow();
   });
 });
-

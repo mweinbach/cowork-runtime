@@ -20,7 +20,7 @@ verifyRuntime()
 buildRuntimeEnv()
         │
         ▼
-tool context + plugin discovery
+tool context
 ```
 
 Reusable exports are available from [`src/index.ts`](../src/index.ts):
@@ -44,8 +44,8 @@ The server should:
 3. Download/install outside an active model turn when possible.
 4. Verify before activation.
 5. Build a scoped environment for shell/tool subprocesses.
-6. Discover plugins from `manifest.paths.plugins`.
-7. Add runtime cache roots to sandbox policy only where writes are genuinely required.
+6. Independently ensure marketplace plugins through the normal user/project plugin installer.
+7. Keep the installed runtime read-only; artifact outputs and temporary profiles belong in normal writable workspace/scratch roots.
 8. Expose status, diagnostics, install, and activation over JSON-RPC.
 9. Log versions and verification results without logging credentials or signed URLs.
 
@@ -64,24 +64,22 @@ Sandboxed commands should receive:
 - `NODE_OPTIONS` and resolver variables;
 - no unrelated provider keys or server secrets.
 
-## Plugin discovery
+## Skills and plugin discovery
 
-The unified runtime contains the curated plugin tree. Consumers should read the active manifest and discover from its declared plugin root rather than hardcoding an old Codex cache location.
+The unified runtime contains no skills or plugins. Marketplace-installed project and user plugins are the authoritative skill content and stay in the normal `.cowork/plugins` roots.
 
-Plugin enable/disable state remains user configuration under `~/.cowork`; upgrading the runtime must not silently re-enable a plugin the user disabled.
-
-Runtime plugin files are immutable release content. User and workspace overrides stay outside the runtime directory.
+Runtime setup and marketplace setup are independent startup operations. A runtime failure must not make the harness treat runtime files as skills, and a marketplace update must not mutate runtime binaries. Plugin enable/disable state remains user configuration under `~/.cowork`.
 
 ## Migration from the split runtime
 
 When agent-coworker adopts this package:
 
-1. Add the unified resolver alongside the existing artifact/Codex/LibreOffice code.
-2. Prefer an active `~/.cowork/runtime/<date>` when present.
-3. Install the unified release if no active runtime exists.
-4. Map tools and plugin discovery to the unified manifest.
-5. Run provider, sandbox, document, presentation, spreadsheet, and packaged-desktop tests.
-6. Remove the old split bootstrap code, state files, and bundle flags in one focused cleanup after the unified path is proven.
+1. Prefer an active `~/.cowork/runtime/<date>` when present.
+2. Install the unified release if no active runtime exists.
+3. Map tool environments to the unified manifest while leaving plugin discovery on marketplace/user/project roots.
+4. Run provider, sandbox, document, presentation, spreadsheet, and packaged-desktop tests.
+5. Remove the old split bootstrap code, state files, and bundle flags after the unified path verifies.
+6. Remove the legacy standalone LibreOffice downloader/cache. Resolve only the `soffice` launcher supplied by the active unified runtime.
 
 Do not permanently probe both old and new cache trees on every turn. If legacy migration is needed, make it an explicit one-time migration with recorded state.
 
@@ -103,10 +101,10 @@ A runtime status response should include:
 - source bundle version;
 - shallow/deep/executable verification state;
 - Node and Python versions;
-- included plugins;
+- separately installed marketplace plugin state;
 - available update date;
 - last install/download error;
 - whether the host is using emulation.
+- managed headless LibreOffice version and real conversion health, reported as part of runtime integrity.
 
 Keep download and activation separate controls so a runtime can be preloaded, verified, and then promoted deliberately.
-

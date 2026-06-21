@@ -41,7 +41,7 @@ The archive and install contract must remain unchanged during this transition.
 
 ## Supplied/private components
 
-Current supplied inputs include `@oai/artifact-tool`, Python `artifact_tool_v2`, and curated productivity plugins.
+Current supplied inputs include `@oai/artifact-tool` and Python `artifact_tool_v2`.
 
 - Never place credentials, authenticated download URLs, or internal source paths in the release manifest.
 - Accept supplied artifacts through a local staging input or protected CI artifact.
@@ -49,11 +49,13 @@ Current supplied inputs include `@oai/artifact-tool`, Python `artifact_tool_v2`,
 - Preserve embedded license and notice files.
 - Record only non-sensitive provenance in `runtime.json`.
 
-## Cowork productivity overlays
+## Skills marketplace boundary
 
-`runtime-overlays/plugins/` contains Cowork-owned additions and deliberate replacements for matching upstream productivity skills. The builder overlays these files only when the corresponding upstream plugin exists, so an overlay cannot invent a partial plugin without its manifest.
+Skills and plugins are not runtime components. Their source of truth is the Cowork skills marketplace, and the application installs them independently into project or user plugin roots.
 
-Use the overlay for Cowork-specific render helpers, task guidance, templates, and QA scripts that must ship with the runtime. Keep maintainer-only fixtures and prompt-battle tooling outside it. When refreshing an upstream runtime, compare common-file hashes before staging: upstream-only files remain, Cowork-only files are added, and same-path Cowork files intentionally win.
+Do not copy, transform, or patch skill content during runtime staging. Marketplace helpers must consume the public runtime environment contract, including `COWORK_RUNTIME_NODE_MODULES`, rather than a Codex cache path.
+
+LibreOffice is a checksum-pinned component input because the reference runtime does not contain it. Cowork copies the normalized official engine into the unified ZIP and builds the headless policy launcher itself. The private engine remains upstream-supplied; the public no-UI/no-print boundary is Cowork-owned.
 
 ## Native dependency policy
 

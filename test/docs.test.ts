@@ -11,7 +11,9 @@ async function markdownFiles(root: string): Promise<string[]> {
   const visit = async (directory: string): Promise<void> => {
     const entries = await fs.readdir(directory, { withFileTypes: true });
     for (const entry of entries) {
-      if ([".git", "node_modules", "payloads", "dist"].includes(entry.name)) continue;
+      if ([".git", "node_modules", "payloads", "dist"].includes(entry.name)) {
+        continue;
+      }
       const absolute = path.join(directory, entry.name);
       if (entry.isDirectory()) await visit(absolute);
       else if (entry.isFile() && entry.name.endsWith(".md")) result.push(absolute);
@@ -46,4 +48,3 @@ describe("maintainer documentation", () => {
     expect(guide).toContain("--component-plan");
   });
 });
-

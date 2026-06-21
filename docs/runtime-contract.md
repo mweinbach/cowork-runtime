@@ -49,11 +49,10 @@ cowork/
   node-resolver/
 dependencies/
   bin/
+  libreoffice/
   node/
   python/
   native/
-plugins/
-  openai-primary-runtime/
 ```
 
 The layout is relocatable. Launchers and resolver hooks derive paths from their own location or from manifest paths; they must not contain the staging machine's absolute paths.
@@ -72,7 +71,6 @@ The layout is relocatable. Launchers and resolver hooks derive paths from their 
 | `components` | Strategy and provenance for each assembled component. |
 | `versions` | Human-readable Node, Python, and package-manager versions. |
 | `paths` | POSIX-style relative paths to runtime entrypoints. |
-| `plugins` | Plugin directories included in the payload. |
 | `payload` | Expected file count and unpacked byte count for deep verification. |
 
 All manifest paths are normalized relative paths. Absolute paths, backslashes, and traversal are rejected.
@@ -104,18 +102,30 @@ COWORK_RUNTIME_NODE
 COWORK_RUNTIME_PYTHON
 COWORK_RUNTIME_NODE_MODULES
 COWORK_RUNTIME_NODE_RESOLVER
-COWORK_RUNTIME_PLUGINS_DIR
+COWORK_RUNTIME_POPPLER_BIN
+COWORK_RUNTIME_SOFFICE
+COWORK_RUNTIME_LIBREOFFICE_DIR
+COWORK_RUNTIME_LIBREOFFICE_BINARY
 ```
 
-The result also prepends runtime entrypoints to `PATH`, prepends the package tree to `NODE_PATH`, and adds the Cowork resolver through `NODE_OPTIONS=--import=...`.
+The result also prepends runtime entrypoints to `PATH`, prepends the package tree to `NODE_PATH`, adds the Cowork resolver through `NODE_OPTIONS=--import=...`, forces `PYTHONDONTWRITEBYTECODE=1`, and disables synchronous LibreOffice printer detection. The private LibreOffice program directory is intentionally absent from `PATH`.
+
+Marketplace skill helpers use `COWORK_RUNTIME_NODE_MODULES` to find supplied packages. The runtime does not contain or patch skill files, and consumers must never use the runtime as a plugin discovery root.
 
 Do not mutate global `process.env` as the integration mechanism. Construct a per-turn or per-child-process environment so unrelated server and provider processes do not inherit the artifact toolchain accidentally.
 
 ## Verification levels
 
 - Shallow verification checks the manifest and required paths.
-- Deep verification recomputes payload file count and unpacked bytes.
-- Executable verification launches Node and Python, imports the Python document stack, imports `@oai/artifact-tool` through the resolver, and checks Git.
+- Deep verification recomputes payload file count and unpacked bytes before and after executable probes.
+- Executable verification launches Node and Python, imports the Python document stack, imports `@oai/artifact-tool` through the resolver, checks Git, checks managed LibreOffice, and performs a real HTML-to-PDF conversion.
 
 A release requires all three on the target host.
 
+## Managed headless LibreOffice
+
+Every complete runtime contains a private, platform-native LibreOffice conversion engine and a Cowork-owned headless policy launcher. Manifest paths identify the public launcher, private engine root, and private console executable. A missing path or failed conversion makes the runtime invalid.
+
+Host LibreOffice installations are never searched. Consumers use `COWORK_RUNTIME_SOFFICE` or the bare `soffice` name resolved from the runtime `bin` directory. Direct invocation of the private engine bypasses policy and is unsupported.
+
+The launcher rejects interactive, printing, macro, scripting, and server modes before starting LibreOffice; forces non-interactive flags; isolates configuration in a disposable profile; disables macro execution, system file dialogs, and printer detection; and accepts only conversion, text-output, version, and help operations. The raw engine remains private because LibreOffice's document filters and renderer still require its shared UI libraries even when no UI is displayed.

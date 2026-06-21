@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "version": "26.2.3",
+  "assets": {
+    "win-x86": {
+      "archiveType": "msi",
+      "url": "https://download.documentfoundation.org/libreoffice/stable/26.2.3/win/x86_64/LibreOffice_26.2.3_Win_x86-64.msi",
+      "sha256": "468d1fb3880af3bcddac002e9054155912c70b45d105bfa1c82036f33456133d"
+    },
+    "macos-x86": {
+      "archiveType": "dmg",
+      "url": "https://download.documentfoundation.org/libreoffice/stable/26.2.3/mac/x86_64/LibreOffice_26.2.3_MacOS_x86-64.dmg",
+      "sha256": "534cefb965b2d1c566c1e675f4ae2e9b0dcfdcd42861044fb0360c2b7a9eace3"
+    },
+    "macos-arm64": {
+      "archiveType": "dmg",
+      "url": "https://download.documentfoundation.org/libreoffice/stable/26.2.3/mac/aarch64/LibreOffice_26.2.3_MacOS_aarch64.dmg",
+      "sha256": "8ea6bdf67dbffc9c47104f73a3c98ed145ff26c00dde44c43633f5b3d741479f"
+    },
+    "linux-x86": {
+      "archiveType": "deb-tar",
+      "url": "https://download.documentfoundation.org/libreoffice/stable/26.2.3/deb/x86_64/LibreOffice_26.2.3_Linux_x86-64_deb.tar.gz",
+      "sha256": "18838cb9d028b664a9d0e966cd4c8ca47ca3ea363c393b41d1b5124740b121a5"
+    },
+    "linux-arm64": {
+      "archiveType": "deb-tar",
+      "url": "https://download.documentfoundation.org/libreoffice/stable/26.2.3/deb/aarch64/LibreOffice_26.2.3_Linux_aarch64_deb.tar.gz",
+      "sha256": "0e5252725da663dbc237367444c9f41caae6ec4b7b58d3e714fcef907becaf9f"
+    }
+  }
+}

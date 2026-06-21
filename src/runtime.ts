@@ -33,6 +33,7 @@ const COMPONENT_PLAN_FILE = path.join(PROJECT_ROOT, "runtime-components.json");
 type ComponentPlanEntry = {
   id: string;
   strategy: "built" | "generated" | "copied";
+  sourceBase?: "reference-runtime" | "component-input";
   source?: string;
   destination: string;
   note?: string;
@@ -72,7 +73,7 @@ function parseComponentPlan(value: unknown): ComponentPlan {
   }
   const components = value.components.map((candidate, index): ComponentPlanEntry => {
     if (!isRecord(candidate)) throw new Error(`Component plan entry ${index} must be an object.`);
-    const { id, strategy, source, destination, note } = candidate;
+    const { id, strategy, sourceBase, source, destination, note } = candidate;
     if (typeof id !== "string" || !id) throw new Error(`Component plan entry ${index} needs an id.`);
     if (strategy !== "built" && strategy !== "generated" && strategy !== "copied") {
       throw new Error(`Component ${id} has an unsupported strategy.`);
@@ -83,6 +84,13 @@ function parseComponentPlan(value: unknown): ComponentPlan {
       if (typeof source !== "string") throw new Error(`Component ${id} source must be a string.`);
       assertSafeRelativePath(source, `component ${id} source`);
     }
+    if (
+      sourceBase !== undefined &&
+      sourceBase !== "reference-runtime" &&
+      sourceBase !== "component-input"
+    ) {
+      throw new Error(`Component ${id} has an unsupported sourceBase.`);
+    }
     if (note !== undefined && typeof note !== "string") {
       throw new Error(`Component ${id} note must be a string.`);
     }
@@ -90,6 +98,7 @@ function parseComponentPlan(value: unknown): ComponentPlan {
       id,
       strategy,
       destination,
+      ...(sourceBase ? { sourceBase } : {}),
       ...(source ? { source } : {}),
       ...(note ? { note } : {}),
     };
@@ -178,21 +187,51 @@ async function payloadStats(runtimeDir: string): Promise<{ fileCount: number; un
   return { fileCount, unpackedBytes };
 }
 
-async function pluginNames(pluginRoot: string): Promise<string[]> {
-  const entries = await fs.readdir(pluginRoot, { withFileTypes: true });
-  return entries
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name)
-    .sort((left, right) => left.localeCompare(right));
-}
-
 async function writeExecutable(filePath: string, content: string): Promise<void> {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   await fs.writeFile(filePath, content, { encoding: "utf8", mode: 0o755 });
   if (process.platform !== "win32") await fs.chmod(filePath, 0o755);
 }
 
-async function generateRuntimeLaunchers(runtimeDir: string, asset: RuntimeAssetId): Promise<void> {
+async function buildWindowsSofficeShim(opts: {
+  destination: string;
+  supportDir: string;
+  rustcPath?: string;
+  prebuiltPath?: string;
+}): Promise<void> {
+  await fs.mkdir(path.dirname(opts.destination), { recursive: true });
+  if (opts.prebuiltPath) {
+    await fs.copyFile(path.resolve(opts.prebuiltPath), opts.destination);
+    return;
+  }
+  const source = path.join(opts.supportDir, "headless-soffice", "shim.rs");
+  await execFileAsync(opts.rustcPath ?? "rustc", [
+    source,
+    "--edition=2021",
+    "--target",
+    "x86_64-pc-windows-msvc",
+    "-C",
+    "opt-level=z",
+    "-C",
+    "strip=symbols",
+    "-o",
+    opts.destination,
+  ], {
+    windowsHide: true,
+    timeout: 120_000,
+    maxBuffer: 4 * 1024 * 1024,
+  });
+}
+
+async function generateRuntimeLaunchers(
+  runtimeDir: string,
+  asset: RuntimeAssetId,
+  opts: {
+    supportDir: string;
+    rustcPath?: string;
+    windowsSofficeShimPath?: string;
+  },
+): Promise<void> {
   const binDir = path.join(runtimeDir, "dependencies", "bin");
   await fs.mkdir(binDir, { recursive: true });
   const windows = asset === "win-x86";
@@ -215,6 +254,14 @@ async function generateRuntimeLaunchers(runtimeDir: string, asset: RuntimeAssetI
       }
       await writeExecutable(path.join(binDir, name), cmd(command));
     }
+    await buildWindowsSofficeShim({
+      destination: path.join(binDir, "soffice.exe"),
+      supportDir: opts.supportDir,
+      ...(opts.rustcPath ? { rustcPath: opts.rustcPath } : {}),
+      ...(opts.windowsSofficeShimPath
+        ? { prebuiltPath: opts.windowsSofficeShimPath }
+        : {}),
+    });
     return;
   }
 
@@ -237,8 +284,15 @@ async function generateRuntimeLaunchers(runtimeDir: string, asset: RuntimeAssetI
       }
       return null;
     })();
-    if (target) await writeExecutable(path.join(binDir, name), shellLauncher(target));
+  if (target) await writeExecutable(path.join(binDir, name), shellLauncher(target));
   }
+  await writeExecutable(
+    path.join(binDir, "soffice"),
+    shellLauncher(
+      "../node/bin/node",
+      '"$SCRIPT_DIR/../../cowork/headless-soffice/launcher.mjs" ',
+    ),
+  );
 }
 
 function isPathInside(parent: string, candidate: string): boolean {
@@ -254,12 +308,19 @@ export async function stageRuntime(opts: {
   force?: boolean;
   createdAt?: string;
   supportDir?: string;
+  componentInputDir?: string;
   componentPlanPath?: string;
+  rustcPath?: string;
+  windowsSofficeShimPath?: string;
   log?: (line: string) => void;
 }): Promise<CoworkRuntimeManifest> {
   assertRuntimeVersion(opts.version);
   const sourceDir = path.resolve(opts.sourceDir);
   const destinationDir = path.resolve(opts.destinationDir);
+  const supportDir = path.resolve(opts.supportDir ?? SUPPORT_DIR);
+  const componentInputDir = path.resolve(
+    opts.componentInputDir ?? path.join(PROJECT_ROOT, "runtime-inputs", opts.asset),
+  );
   if (isPathInside(sourceDir, destinationDir) || isPathInside(destinationDir, sourceDir)) {
     throw new Error("Source and destination runtime directories must not contain one another.");
   }
@@ -288,31 +349,19 @@ export async function stageRuntime(opts: {
     await fs.mkdir(destinationDir, { recursive: true });
     for (const component of componentPlan.components) {
       const destination = resolveManifestPath(destinationDir, component.destination);
-      if (component.id === "cowork-productivity-overlays") {
-        if (!component.source) {
-          throw new Error("Cowork productivity overlays need a repository source path.");
-        }
-        const overlayRoot = resolveManifestPath(PROJECT_ROOT, component.source);
-        const overlayPlugins = await fs.readdir(overlayRoot, { withFileTypes: true });
-        for (const overlayPlugin of overlayPlugins) {
-          if (!overlayPlugin.isDirectory()) continue;
-          const pluginDestination = path.join(destination, overlayPlugin.name);
-          const destinationStat = await fs.stat(pluginDestination).catch(() => null);
-          if (!destinationStat?.isDirectory()) continue;
-          opts.log?.(`Overlaying Cowork files onto plugin ${overlayPlugin.name}`);
-          await fs.cp(path.join(overlayRoot, overlayPlugin.name), pluginDestination, {
-            recursive: true,
-            force: true,
-            dereference: false,
-            preserveTimestamps: true,
-            verbatimSymlinks: true,
-          });
-        }
-      } else if (component.strategy === "copied") {
+      if (component.strategy === "copied") {
         if (!component.source) throw new Error(`Copied component ${component.id} needs a source.`);
-        const sourcePath = resolveManifestPath(sourceDir, component.source);
+        const sourceRoot =
+          component.sourceBase === "component-input" ? componentInputDir : sourceDir;
+        const sourcePath = resolveManifestPath(sourceRoot, component.source);
         const stat = await fs.stat(sourcePath).catch(() => null);
-        if (!stat) throw new Error(`Component source is missing: ${sourcePath}`);
+        if (!stat) {
+          const hint =
+            component.sourceBase === "component-input"
+              ? ` Run prepare-libreoffice for ${opts.asset} first.`
+              : "";
+          throw new Error(`Component source is missing: ${sourcePath}.${hint}`);
+        }
         opts.log?.(`Copying component ${component.id}`);
         await fs.mkdir(path.dirname(destination), { recursive: true });
         await fs.cp(sourcePath, destination, {
@@ -323,7 +372,6 @@ export async function stageRuntime(opts: {
           verbatimSymlinks: true,
         });
       } else if (component.id === "node-module-resolver") {
-        const supportDir = path.resolve(opts.supportDir ?? SUPPORT_DIR);
         const resolverSource = path.join(supportDir, "node-resolver");
         opts.log?.("Building Cowork Node module resolver");
         await fs.mkdir(path.dirname(destination), { recursive: true });
@@ -333,9 +381,25 @@ export async function stageRuntime(opts: {
           dereference: false,
           verbatimSymlinks: true,
         });
+      } else if (component.id === "headless-soffice-launcher") {
+        const launcherSource = path.join(supportDir, "headless-soffice");
+        opts.log?.("Building Cowork headless soffice support layer");
+        await fs.mkdir(path.dirname(destination), { recursive: true });
+        await fs.cp(launcherSource, destination, {
+          recursive: true,
+          force: true,
+          dereference: false,
+          verbatimSymlinks: true,
+        });
       } else if (component.id === "runtime-launchers") {
         opts.log?.("Generating relocatable runtime launchers");
-        await generateRuntimeLaunchers(destinationDir, opts.asset);
+        await generateRuntimeLaunchers(destinationDir, opts.asset, {
+          supportDir,
+          ...(opts.rustcPath ? { rustcPath: opts.rustcPath } : {}),
+          ...(opts.windowsSofficeShimPath
+            ? { windowsSofficeShimPath: opts.windowsSofficeShimPath }
+            : {}),
+        });
       } else if (component.id === "source-provenance") {
         await fs.mkdir(path.dirname(destination), { recursive: true });
         await fs.writeFile(destination, `${JSON.stringify(source, null, 2)}\n`, "utf8");
@@ -369,11 +433,6 @@ export async function stageRuntime(opts: {
       ["cowork/node-resolver/register.mjs"],
       "Cowork Node resolver",
     );
-    const plugins = await requireExisting(
-      destinationDir,
-      ["plugins/openai-primary-runtime/plugins"],
-      "plugin directory",
-    );
     const artifactToolPackage = await requireExisting(
       destinationDir,
       ["dependencies/node/node_modules/@oai/artifact-tool"],
@@ -392,6 +451,35 @@ export async function stageRuntime(opts: {
       "dependencies/bin/pdftoppm.cmd",
       "dependencies/bin/pdftoppm",
     ]);
+    const popplerBin = await firstExisting(destinationDir, [
+      "dependencies/native/poppler/Library/bin",
+      "dependencies/native/poppler/bin",
+    ]);
+    const libreOffice = await requireExisting(
+      destinationDir,
+      ["dependencies/libreoffice"],
+      "managed LibreOffice payload",
+    );
+    const libreOfficeBinary = await requireExisting(
+      destinationDir,
+      [
+        "dependencies/libreoffice/program/soffice.com",
+        "dependencies/libreoffice/program/soffice",
+        "dependencies/libreoffice/LibreOffice.app/Contents/MacOS/soffice",
+      ],
+      "private LibreOffice executable",
+    );
+    const soffice = await requireExisting(
+      destinationDir,
+      ["dependencies/bin/soffice.exe", "dependencies/bin/soffice"],
+      "Cowork headless soffice launcher",
+    );
+    const libreOfficeProvenance = JSON.parse(
+      await fs.readFile(path.join(libreOffice, "cowork-libreoffice.json"), "utf8"),
+    ) as { version?: unknown };
+    if (typeof libreOfficeProvenance.version !== "string" || !libreOfficeProvenance.version) {
+      throw new Error("Prepared LibreOffice provenance is missing its version.");
+    }
     const stats = await payloadStats(destinationDir);
     const manifest: CoworkRuntimeManifest = {
       schemaVersion: 1,
@@ -410,13 +498,21 @@ export async function stageRuntime(opts: {
         id: component.id,
         strategy: component.strategy,
         path: component.destination,
-        ...(component.source ? { source: component.source } : {}),
+        ...(component.source
+          ? {
+              source:
+                component.sourceBase === "component-input"
+                  ? `component-input:${component.source}`
+                  : component.source,
+            }
+          : {}),
         ...(component.note ? { note: component.note } : {}),
       })),
       versions: {
         ...(source.nodeVersion ? { node: source.nodeVersion } : {}),
         ...(source.pythonVersion ? { python: source.pythonVersion } : {}),
         ...(source.pnpmVersion ? { pnpm: source.pnpmVersion } : {}),
+        libreOffice: libreOfficeProvenance.version,
       },
       paths: {
         bin: toManifestPath(destinationDir, bin),
@@ -424,14 +520,16 @@ export async function stageRuntime(opts: {
         python: toManifestPath(destinationDir, python),
         nodeModules: toManifestPath(destinationDir, nodeModules),
         nodeResolver: toManifestPath(destinationDir, resolver),
-        plugins: toManifestPath(destinationDir, plugins),
         artifactToolPackage: toManifestPath(destinationDir, artifactToolPackage),
         ...(pnpm ? { pnpm: toManifestPath(destinationDir, pnpm) } : {}),
         ...(git ? { git: toManifestPath(destinationDir, git) } : {}),
         ...(pdfinfo ? { pdfinfo: toManifestPath(destinationDir, pdfinfo) } : {}),
         ...(pdftoppm ? { pdftoppm: toManifestPath(destinationDir, pdftoppm) } : {}),
+        ...(popplerBin ? { popplerBin: toManifestPath(destinationDir, popplerBin) } : {}),
+        soffice: toManifestPath(destinationDir, soffice),
+        libreOffice: toManifestPath(destinationDir, libreOffice),
+        libreOfficeBinary: toManifestPath(destinationDir, libreOfficeBinary),
       },
-      plugins: await pluginNames(plugins),
       payload: stats,
     };
     await writeRuntimeManifest(destinationDir, manifest);
@@ -459,6 +557,7 @@ export async function buildRuntimeEnv(
     pythonDir,
     path.join(pythonDir, "Scripts"),
     ...(manifest.paths.git ? [path.dirname(absolute(manifest.paths.git))] : []),
+    ...(manifest.paths.popplerBin ? [absolute(manifest.paths.popplerBin)] : []),
   ];
   const nodeModules = absolute(manifest.paths.nodeModules);
   const resolverOption = `--import=${pathToFileURL(absolute(manifest.paths.nodeResolver)).href}`;
@@ -473,6 +572,7 @@ export async function buildRuntimeEnv(
   result[pathKey] = dedupePathEntries([...pathDirs, ...currentPath], platform).join(delimiter);
   result.NODE_PATH = dedupePathEntries([nodeModules, ...currentNodePath], platform).join(delimiter);
   result.NODE_OPTIONS = appendNodeOption(baseEnv.NODE_OPTIONS, resolverOption);
+  result.PYTHONDONTWRITEBYTECODE = "1";
   result.COWORK_RUNTIME_DIR = resolvedRuntimeDir;
   result.COWORK_RUNTIME_VERSION = manifest.version;
   result.COWORK_RUNTIME_ASSET = manifest.asset;
@@ -481,7 +581,17 @@ export async function buildRuntimeEnv(
   result.COWORK_RUNTIME_PYTHON = absolute(manifest.paths.python);
   result.COWORK_RUNTIME_NODE_MODULES = nodeModules;
   result.COWORK_RUNTIME_NODE_RESOLVER = absolute(manifest.paths.nodeResolver);
-  result.COWORK_RUNTIME_PLUGINS_DIR = absolute(manifest.paths.plugins);
+  if (manifest.paths.popplerBin) {
+    result.COWORK_RUNTIME_POPPLER_BIN = absolute(manifest.paths.popplerBin);
+  }
+  if (manifest.paths.soffice) result.COWORK_RUNTIME_SOFFICE = absolute(manifest.paths.soffice);
+  if (manifest.paths.libreOffice) {
+    result.COWORK_RUNTIME_LIBREOFFICE_DIR = absolute(manifest.paths.libreOffice);
+  }
+  if (manifest.paths.libreOfficeBinary) {
+    result.COWORK_RUNTIME_LIBREOFFICE_BINARY = absolute(manifest.paths.libreOfficeBinary);
+  }
+  result.SAL_DISABLE_SYNCHRONOUS_PRINTER_DETECTION = "1";
   return result;
 }
 
@@ -499,6 +609,36 @@ async function commandVersion(
     maxBuffer: 4 * 1024 * 1024,
   });
   return `${result.stdout || result.stderr}`.trim().split(/\r?\n/)[0] ?? "ok";
+}
+
+async function verifySofficeConversion(
+  executable: string,
+  env: Record<string, string>,
+): Promise<string> {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-runtime-soffice-"));
+  try {
+    const input = path.join(tempDir, "cowork-soffice-smoke.html");
+    const output = path.join(tempDir, "cowork-soffice-smoke.pdf");
+    await fs.writeFile(
+      input,
+      "<!doctype html><title>Cowork Runtime</title><p>Managed headless LibreOffice smoke test.</p>\n",
+      "utf8",
+    );
+    await execFileAsync(executable, ["--convert-to", "pdf", "--outdir", tempDir, input], {
+      env,
+      cwd: tempDir,
+      windowsHide: true,
+      timeout: 180_000,
+      maxBuffer: 4 * 1024 * 1024,
+    });
+    const stat = await fs.stat(output).catch(() => null);
+    if (!stat?.isFile() || stat.size === 0) {
+      throw new Error("Managed headless soffice did not produce a non-empty PDF.");
+    }
+    return `${stat.size} byte PDF`;
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
 }
 
 export async function verifyRuntime(opts: {
@@ -529,12 +669,9 @@ export async function verifyRuntime(opts: {
     if (!stat) errors.push(`Missing runtime path ${name}: ${relative}`);
     else checks[name] = relative;
   }
-  for (const plugin of manifest.plugins) {
-    const skillRoot = path.join(resolveManifestPath(runtimeDir, manifest.paths.plugins), plugin, "skills");
-    const stat = await fs.stat(skillRoot).catch(() => null);
-    if (!stat?.isDirectory()) errors.push(`Plugin ${plugin} has no skills directory.`);
+  for (const key of ["soffice", "libreOffice", "libreOfficeBinary"] as const) {
+    if (!manifest.paths[key]) errors.push(`Runtime is missing required managed LibreOffice path: ${key}.`);
   }
-
   if (opts.deep) {
     const stats = await payloadStats(runtimeDir);
     checks.payload = `${stats.fileCount} files, ${stats.unpackedBytes} bytes`;
@@ -562,7 +699,7 @@ export async function verifyRuntime(opts: {
         python,
         [
           "-c",
-          "import docx,lxml,PIL,pandas,numpy,pypdf,reportlab,pdf2image; print('ok')",
+          "import docx,lxml,PIL,pandas,numpy,pypdf,pdfplumber,reportlab,pdf2image; print('ok')",
         ],
         env,
       );
@@ -585,8 +722,28 @@ export async function verifyRuntime(opts: {
           env,
         );
       }
+      if (manifest.paths.soffice) {
+        const soffice = resolveManifestPath(runtimeDir, manifest.paths.soffice);
+        checks.libreOfficeVersion = await commandVersion(soffice, ["--version"], env);
+        checks.libreOfficeConversion = await verifySofficeConversion(soffice, env);
+      }
     } catch (error) {
       errors.push(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  if (opts.deep && opts.execute && errors.length === 0) {
+    const stats = await payloadStats(runtimeDir);
+    checks.payloadAfterExecute = `${stats.fileCount} files, ${stats.unpackedBytes} bytes`;
+    if (stats.fileCount !== manifest.payload.fileCount) {
+      errors.push(
+        `Payload file count changed during executable verification: manifest=${manifest.payload.fileCount}, actual=${stats.fileCount}.`,
+      );
+    }
+    if (stats.unpackedBytes !== manifest.payload.unpackedBytes) {
+      errors.push(
+        `Payload size changed during executable verification: manifest=${manifest.payload.unpackedBytes}, actual=${stats.unpackedBytes}.`,
+      );
     }
   }
 

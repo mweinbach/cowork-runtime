@@ -32,12 +32,14 @@ The source must contain a `runtime.json` with `bundleVersion`, `targetPlatform`,
 dependencies/node/
 dependencies/python/
 dependencies/native/
-plugins/openai-primary-runtime/
+runtime-inputs/<asset>/libreoffice/
 ```
 
 The exact executable candidates are resolved in [`src/runtime.ts`](../src/runtime.ts). Add candidates rather than scattering platform checks through consumers.
 
 Build or acquire the payload on the target OS. A source tree copied from another platform can contain valid-looking paths while still carrying unusable native modules.
+
+Run `bun src/cli.ts prepare-libreoffice --asset <asset>` on that target OS. The command downloads the pinned official archive from `libreoffice-sources.json`, verifies SHA-256 before extraction, normalizes the engine into `runtime-inputs/<asset>/libreoffice`, and records provenance. Add or update the asset metadata before staging a new platform.
 
 ## 3. Create the platform recipe
 
@@ -72,6 +74,8 @@ The plan may use:
 - `generated` for platform launchers, manifests, and provenance;
 - `copied` for supplied or prebuilt input trees.
 
+Set `sourceBase` to `component-input` when a copied component comes from `runtime-inputs/<asset>` rather than the OAI reference payload.
+
 See [Component lifecycle](component-lifecycle.md) before classifying a new dependency.
 
 ## 4. Add runtime entrypoint candidates
@@ -84,8 +88,8 @@ Update [`src/runtime.ts`](../src/runtime.ts) for the platform's actual layout:
 - pnpm launcher;
 - Git executable;
 - Poppler entrypoints;
-- plugin root;
 - `@oai/artifact-tool` package root.
+- managed `soffice` launcher and private LibreOffice console binary.
 
 Keep manifest paths POSIX-style even on Windows. Convert them to native paths only at runtime.
 
@@ -132,6 +136,10 @@ The ZIP builder and extractor support executable modes and contained relative sy
 - Test generated `.cmd` launchers through both PowerShell and `cmd.exe`.
 - For ARM64, test from an ARM64 machine even though `win-x86` runs under x64 emulation.
 
+### Managed LibreOffice component
+
+LibreOffice must be prepared from the pinned platform archive and included in the ZIP. Keep its private program directory off `PATH`; only generate the Cowork policy launcher in `dependencies/bin`. Platform validation must prove that the launcher blocks printing/UI options and completes a real document-to-PDF conversion without opening a window. Preserve macOS application signing by leaving the signed app payload intact and enforcing the boundary at the launcher.
+
 ## 7. Add tests and CI coverage
 
 At minimum add:
@@ -160,6 +168,6 @@ All platform assets for a date share one release tag. Build each asset on its na
 - [ ] Modes and symlinks survive ZIP round-trip.
 - [ ] Deep and executable verification pass after clean extraction.
 - [ ] Representative artifact workflow passes.
+- [ ] Managed headless `soffice` rejects UI/printing modes and passes a real conversion.
 - [ ] Release asset and SHA-256 sidecar published.
 - [ ] Harness selection test added.
-

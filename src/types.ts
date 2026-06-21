@@ -37,6 +37,7 @@ export type CoworkRuntimeManifest = {
     node?: string;
     python?: string;
     pnpm?: string;
+    libreOffice?: string;
   };
   paths: {
     bin: string;
@@ -44,14 +45,16 @@ export type CoworkRuntimeManifest = {
     python: string;
     nodeModules: string;
     nodeResolver: string;
-    plugins: string;
     artifactToolPackage: string;
     pnpm?: string;
     git?: string;
     pdfinfo?: string;
     pdftoppm?: string;
+    popplerBin?: string;
+    soffice?: string;
+    libreOffice?: string;
+    libreOfficeBinary?: string;
   };
-  plugins: string[];
   payload: {
     fileCount: number;
     unpackedBytes: number;

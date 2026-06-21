@@ -50,9 +50,6 @@ export function parseRuntimeManifest(value: unknown): CoworkRuntimeManifest {
   if (!Array.isArray(value.compatibleHosts) || !value.compatibleHosts.every((v) => typeof v === "string")) {
     throw new Error("Runtime manifest compatibleHosts must be a string array.");
   }
-  if (!Array.isArray(value.plugins) || !value.plugins.every((v) => typeof v === "string")) {
-    throw new Error("Runtime manifest plugins must be a string array.");
-  }
   if (!Array.isArray(value.components) || !value.components.every(isRecord)) {
     throw new Error("Runtime manifest components must be an object array.");
   }
@@ -79,13 +76,21 @@ export function parseRuntimeManifest(value: unknown): CoworkRuntimeManifest {
     "python",
     "nodeModules",
     "nodeResolver",
-    "plugins",
     "artifactToolPackage",
   ] as const;
   for (const key of requiredPathKeys) {
     assertSafeRelativePath(requireString(rawPaths, key), `paths.${key}`);
   }
-  for (const key of ["pnpm", "git", "pdfinfo", "pdftoppm"] as const) {
+  for (const key of [
+    "pnpm",
+    "git",
+    "pdfinfo",
+    "pdftoppm",
+    "popplerBin",
+    "soffice",
+    "libreOffice",
+    "libreOfficeBinary",
+  ] as const) {
     const candidate = rawPaths[key];
     if (candidate !== undefined) {
       if (typeof candidate !== "string") throw new Error(`paths.${key} must be a string.`);

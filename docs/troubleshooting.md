@@ -50,10 +50,22 @@ Confirm the bundled Python executable is used, not system Python:
 
 ```powershell
 & "$Runtime\dependencies\python\python.exe" --version
-& "$Runtime\dependencies\python\python.exe" -c "import docx,lxml,PIL,pandas,numpy,pypdf,reportlab,pdf2image; print('ok')"
+& "$Runtime\dependencies\python\python.exe" -c "import docx,lxml,PIL,pandas,numpy,pypdf,pdfplumber,reportlab,pdf2image; print('ok')"
 ```
 
 Do not repair an installed runtime with `pip install`. Update the recipe and publish a new immutable runtime.
+
+## `soffice` is unavailable
+
+The runtime is incomplete or damaged. Do not fall back to a host LibreOffice installation.
+
+- Check that `COWORK_RUNTIME_SOFFICE` points to `dependencies/bin/soffice` (or `soffice.exe`) inside the active version.
+- Run `cowork-runtime verify --deep --execute`; it performs a real PDF conversion.
+- Reinstall the release if a manifest path or payload count is wrong.
+- Activate the retained fallback version if the latest release fails.
+- If building locally, rerun `prepare-libreoffice`, then stage and rebuild the full ZIP.
+
+The raw `dependencies/libreoffice/program` directory must remain off `PATH`. Never invoke it directly to bypass the headless policy launcher.
 
 ## Native command fails after relocation
 
@@ -78,4 +90,3 @@ Confirm:
 - asset name exactly matches the host mapping;
 - the ZIP and checksum are both attached;
 - the release is visible to the credentials/network context used by the harness.
-

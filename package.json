@@ -10,6 +10,7 @@
     ".": "./src/index.ts"
   },
   "scripts": {
+    "prepare:libreoffice": "bun src/cli.ts prepare-libreoffice",
     "stage": "bun src/cli.ts stage",
     "build": "bun src/cli.ts build",
     "verify": "bun src/cli.ts verify",
