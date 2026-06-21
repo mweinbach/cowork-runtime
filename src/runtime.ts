@@ -239,7 +239,9 @@ async function generateRuntimeLaunchers(
     const cmd = (command: string): string => `@echo off\r\nsetlocal\r\n${command}\r\nexit /b %ERRORLEVEL%\r\n`;
     await writeExecutable(
       path.join(binDir, "pnpm.cmd"),
-      cmd('"%~dp0..\\node\\bin\\node.exe" "%~dp0..\\node\\node_modules\\pnpm\\bin\\pnpm.mjs" %*'),
+      cmd(
+        'set "NODE_OPTIONS="\r\n"%~dp0..\\node\\bin\\node.exe" "%~dp0..\\node\\node_modules\\pnpm\\bin\\pnpm.mjs" %*',
+      ),
     );
     const nativeLaunchers: Array<[string, string]> = [
       ["pdfinfo.cmd", '"%~dp0..\\native\\poppler\\Library\\bin\\pdfinfo.exe" %*'],
@@ -270,11 +272,15 @@ async function generateRuntimeLaunchers(
     return;
   }
 
-  const shellLauncher = (target: string, prefix = ""): string =>
-    `#!/bin/sh\nSCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\nexec "$SCRIPT_DIR/${target}" ${prefix}"$@"\n`;
+  const shellLauncher = (target: string, prefix = "", environment = ""): string =>
+    `#!/bin/sh\nSCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\n${environment}exec "$SCRIPT_DIR/${target}" ${prefix}"$@"\n`;
   await writeExecutable(
     path.join(binDir, "pnpm"),
-    shellLauncher("../node/bin/node", '"$SCRIPT_DIR/../node/node_modules/pnpm/bin/pnpm.mjs" '),
+    shellLauncher(
+      "../node/bin/node",
+      '"$SCRIPT_DIR/../node/node_modules/pnpm/bin/pnpm.mjs" ',
+      "NODE_OPTIONS= ",
+    ),
   );
   for (const [name, candidates] of [
     ["pdfinfo", ["../native/poppler/bin/pdfinfo", "../native/poppler/Library/bin/pdfinfo"]],

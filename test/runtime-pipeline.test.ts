@@ -241,6 +241,7 @@ describe("unified runtime pipeline", () => {
     expect(await fs.readlink(convertedLink)).toBe("heif-dec");
 
     const bin = path.join(installed.runtimeDir, "dependencies", "bin");
+    expect(await fs.readFile(path.join(bin, "pnpm"), "utf8")).toContain("NODE_OPTIONS= exec");
     expect((await execFileAsync(path.join(bin, "pdfinfo"), ["--version"])).stdout.trim()).toBe(
       "pdfinfo:--version",
     );
@@ -252,6 +253,8 @@ describe("unified runtime pipeline", () => {
     expect((await execFileAsync(path.join(bin, "pnpm"), ["--version"])).stdout.trim()).toContain(
       "pnpm.mjs --version",
     );
+    expect(await fs.readFile(path.join(installed.runtimeDir, "cowork", "node-resolver", "hooks.mjs"), "utf8"))
+      .toContain("if (!runtimeParentURL || !isBareSpecifier(specifier))");
   });
 
   test("stages components, builds a release, and installs by date", async () => {
@@ -285,6 +288,8 @@ describe("unified runtime pipeline", () => {
       .toContain("fixture.1");
     expect(await fs.readFile(path.join(staged, "dependencies", "bin", "pnpm.cmd"), "utf8"))
       .toContain("node.exe");
+    expect(await fs.readFile(path.join(staged, "dependencies", "bin", "pnpm.cmd"), "utf8"))
+      .toContain('set "NODE_OPTIONS="');
 
     const verification = await verifyRuntime({ runtimeDir: staged, deep: true });
     expect(verification.errors).toEqual([]);

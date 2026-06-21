@@ -18,11 +18,12 @@ function isBareSpecifier(specifier) {
 }
 
 export async function resolve(specifier, context, nextResolve) {
+  if (!runtimeParentURL || !isBareSpecifier(specifier)) {
+    return nextResolve(specifier, context);
+  }
   try {
     return await nextResolve(specifier, context);
   } catch (error) {
-    if (!runtimeParentURL || !isBareSpecifier(specifier)) throw error;
-
     try {
       return await nextResolve(specifier, { ...context, parentURL: runtimeParentURL });
     } catch {
@@ -30,4 +31,3 @@ export async function resolve(specifier, context, nextResolve) {
     }
   }
 }
-
