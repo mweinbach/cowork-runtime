@@ -119,6 +119,25 @@ function assertBuildHost(asset: RuntimeAssetId, platform: NodeJS.Platform): void
   }
 }
 
+function preparedOfficeEnvironment(baseEnv: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return {
+    ...baseEnv,
+    PYTHONDONTWRITEBYTECODE: "1",
+    SAL_DISABLE_SYNCHRONOUS_PRINTER_DETECTION: "1",
+  };
+}
+
+function codeSignatureVerification(
+  officeRoot: string,
+  asset: RuntimeAssetId,
+): { command: string; args: string[] } | null {
+  if (!asset.startsWith("macos-")) return null;
+  return {
+    command: "codesign",
+    args: ["--verify", "--deep", "--strict", path.join(officeRoot, "LibreOffice.app")],
+  };
+}
+
 async function downloadArchive(
   source: LibreOfficeSource,
   destination: string,
@@ -294,11 +313,12 @@ async function verifyPreparedOffice(officeRoot: string, source: LibreOfficeSourc
   const executable = rawSofficePath(officeRoot, source.asset);
   const stat = await fs.stat(executable).catch(() => null);
   if (!stat?.isFile()) throw new Error(`Prepared LibreOffice is missing ${executable}.`);
+  const verificationEnv = preparedOfficeEnvironment(process.env);
   await run(
     executable,
     ["--headless", "--invisible", "--nologo", "--version"],
     60_000,
-    { ...process.env, SAL_DISABLE_SYNCHRONOUS_PRINTER_DETECTION: "1" },
+    verificationEnv,
   );
   const scratch = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-libreoffice-verify-"));
   try {
@@ -324,7 +344,7 @@ async function verifyPreparedOffice(officeRoot: string, source: LibreOfficeSourc
         input,
       ],
       180_000,
-      { ...process.env, SAL_DISABLE_SYNCHRONOUS_PRINTER_DETECTION: "1" },
+      verificationEnv,
     );
     const outputStat = await fs.stat(output).catch(() => null);
     if (!outputStat?.isFile() || outputStat.size === 0) {
@@ -332,6 +352,14 @@ async function verifyPreparedOffice(officeRoot: string, source: LibreOfficeSourc
     }
   } finally {
     await fs.rm(scratch, { recursive: true, force: true });
+  }
+  const signatureVerification = codeSignatureVerification(officeRoot, source.asset);
+  if (signatureVerification) {
+    await run(
+      signatureVerification.command,
+      signatureVerification.args,
+      5 * 60_000,
+    );
   }
 }
 
@@ -409,5 +437,7 @@ export async function prepareLibreOfficeInput(opts: {
 
 export const __libreOfficeInternal = {
   assertBuildHost,
+  codeSignatureVerification,
   parseSources,
+  preparedOfficeEnvironment,
 };

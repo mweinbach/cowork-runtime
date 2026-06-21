@@ -28,6 +28,25 @@ describe("managed headless LibreOffice", () => {
     expect(() => __libreOfficeInternal.assertBuildHost("linux-arm64", "linux")).not.toThrow();
   });
 
+  test("preserves the signed macOS app during preparation", () => {
+    expect(__libreOfficeInternal.preparedOfficeEnvironment({ PYTHONDONTWRITEBYTECODE: "0" }))
+      .toMatchObject({
+        PYTHONDONTWRITEBYTECODE: "1",
+        SAL_DISABLE_SYNCHRONOUS_PRINTER_DETECTION: "1",
+      });
+    expect(__libreOfficeInternal.codeSignatureVerification("/runtime/libreoffice", "macos-arm64"))
+      .toEqual({
+        command: "codesign",
+        args: [
+          "--verify",
+          "--deep",
+          "--strict",
+          path.join("/runtime/libreoffice", "LibreOffice.app"),
+        ],
+      });
+    expect(__libreOfficeInternal.codeSignatureVerification("C:\\runtime", "win-x86")).toBeNull();
+  });
+
   test("forces an isolated headless invocation and blocks UI and printing", async () => {
     const launcherPath = path.resolve("runtime-support", "headless-soffice", "launcher.mjs");
     const launcherUrl = pathToFileURL(launcherPath).href;
