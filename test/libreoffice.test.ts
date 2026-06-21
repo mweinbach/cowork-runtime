@@ -1,9 +1,14 @@
 import { describe, expect, test } from "bun:test";
+import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { promisify } from "node:util";
 
 import { __libreOfficeInternal, readLibreOfficeSource } from "../src/libreoffice";
+
+const execFileAsync = promisify(execFile);
 
 describe("managed headless LibreOffice", () => {
   test("pins a checksum-verified source for every runtime asset", async () => {
@@ -83,5 +88,38 @@ describe("managed headless LibreOffice", () => {
     const launcherSource = await fs.readFile(launcherPath, "utf8");
     expect(launcherSource).toContain("DisableMacrosExecution");
     expect(launcherSource).toContain("SAL_DISABLE_SYNCHRONOUS_PRINTER_DETECTION");
+  });
+
+  test("runs when invoked through a symlinked runtime path", async () => {
+    if (process.platform === "win32") return;
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-soffice-symlink-"));
+    try {
+      const realRoot = path.join(root, "real");
+      const aliasRoot = path.join(root, "alias");
+      const fakeSoffice = path.join(root, "fake-soffice");
+      await fs.mkdir(realRoot, { recursive: true });
+      await fs.symlink(path.resolve("runtime-support"), path.join(realRoot, "runtime-support"));
+      await fs.symlink(realRoot, aliasRoot);
+      await fs.writeFile(fakeSoffice, "#!/bin/sh\nprintf 'fake-soffice:%s\\n' \"$*\"\n", "utf8");
+      await fs.chmod(fakeSoffice, 0o755);
+
+      const launcher = path.join(
+        aliasRoot,
+        "runtime-support",
+        "headless-soffice",
+        "launcher.mjs",
+      );
+      const result = await execFileAsync(process.execPath, [launcher, "--version"], {
+        env: {
+          ...process.env,
+          COWORK_RUNTIME_DIR: realRoot,
+          COWORK_RUNTIME_LIBREOFFICE_BINARY: fakeSoffice,
+        },
+      });
+      expect(result.stdout).toContain("fake-soffice:");
+      expect(result.stdout).toContain("--version");
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
   });
 });

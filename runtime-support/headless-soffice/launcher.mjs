@@ -177,8 +177,18 @@ export function main(arguments_ = process.argv.slice(2)) {
   }
 }
 
-const invokedPath = process.argv[1] ? path.resolve(process.argv[1]) : "";
-if (invokedPath === fileURLToPath(import.meta.url)) {
+function canonicalPath(candidate) {
+  if (!candidate) return "";
+  const resolved = path.resolve(candidate);
+  try {
+    return fs.realpathSync(resolved);
+  } catch {
+    return resolved;
+  }
+}
+
+const invokedPath = canonicalPath(process.argv[1]);
+if (invokedPath === canonicalPath(fileURLToPath(import.meta.url))) {
   try {
     main();
   } catch (error) {
