@@ -50,6 +50,8 @@ export type CoworkRuntimeManifest = {
     git?: string;
     pdfinfo?: string;
     pdftoppm?: string;
+    heifConvert?: string;
+    jxrDecApp?: string;
     popplerBin?: string;
     soffice?: string;
     libreOffice?: string;

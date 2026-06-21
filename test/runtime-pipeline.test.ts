@@ -193,6 +193,8 @@ describe("unified runtime pipeline", () => {
       git: "dependencies/native/git/bin/git",
       pdfinfo: "dependencies/bin/pdfinfo",
       pdftoppm: "dependencies/bin/pdftoppm",
+      heifConvert: "dependencies/bin/heif-convert",
+      jxrDecApp: "dependencies/bin/JxrDecApp",
       popplerBin: "dependencies/native/poppler/bin",
       soffice: "dependencies/bin/soffice",
       libreOfficeBinary: "dependencies/libreoffice/LibreOffice.app/Contents/MacOS/soffice",
@@ -275,6 +277,8 @@ describe("unified runtime pipeline", () => {
     expect(stagedManifest.components.some((entry) => entry.id === "productivity-plugins")).toBe(false);
     expect(stagedManifest.paths).not.toHaveProperty("plugins");
     expect(stagedManifest.paths.soffice).toBe("dependencies/bin/soffice.exe");
+    expect(stagedManifest.paths.heifConvert).toBe("dependencies/bin/heif-convert.cmd");
+    expect(stagedManifest.paths.jxrDecApp).toBe("dependencies/bin/JxrDecApp.cmd");
     expect(stagedManifest.versions.libreOffice).toBe("26.2.3");
     await expect(fs.stat(path.join(staged, "plugins"))).rejects.toThrow();
     expect(await fs.readFile(path.join(staged, "provenance", "codex-primary-runtime.json"), "utf8"))

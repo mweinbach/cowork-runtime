@@ -249,7 +249,12 @@ async function generateRuntimeLaunchers(
     ];
     for (const [name, command] of nativeLaunchers) {
       const target = command.match(/\.\.\\native\\([^\"]+)/)?.[1];
-      if (target && !(await fs.stat(path.join(runtimeDir, "dependencies", "native", target)).catch(() => null))) {
+      if (
+        target &&
+        !(await fs.stat(
+          path.join(runtimeDir, "dependencies", "native", ...target.split("\\")),
+        ).catch(() => null))
+      ) {
         continue;
       }
       await writeExecutable(path.join(binDir, name), cmd(command));
@@ -441,23 +446,35 @@ export async function stageRuntime(opts: {
       ["dependencies/node/node_modules/@oai/artifact-tool"],
       "@oai/artifact-tool",
     );
-    const pnpm = await firstExisting(destinationDir, ["dependencies/bin/pnpm.cmd", "dependencies/bin/pnpm"]);
-    const git = await firstExisting(destinationDir, [
+    const pnpm = await requireExisting(
+      destinationDir,
+      ["dependencies/bin/pnpm.cmd", "dependencies/bin/pnpm"],
+      "pnpm launcher",
+    );
+    const git = await requireExisting(destinationDir, [
       "dependencies/native/git/cmd/git.exe",
       "dependencies/native/git/bin/git",
-    ]);
-    const pdfinfo = await firstExisting(destinationDir, [
+    ], "Git");
+    const pdfinfo = await requireExisting(destinationDir, [
       "dependencies/bin/pdfinfo.cmd",
       "dependencies/bin/pdfinfo",
-    ]);
-    const pdftoppm = await firstExisting(destinationDir, [
+    ], "pdfinfo launcher");
+    const pdftoppm = await requireExisting(destinationDir, [
       "dependencies/bin/pdftoppm.cmd",
       "dependencies/bin/pdftoppm",
-    ]);
-    const popplerBin = await firstExisting(destinationDir, [
+    ], "pdftoppm launcher");
+    const heifConvert = await requireExisting(destinationDir, [
+      "dependencies/bin/heif-convert.cmd",
+      "dependencies/bin/heif-convert",
+    ], "heif-convert launcher");
+    const jxrDecApp = await requireExisting(destinationDir, [
+      "dependencies/bin/JxrDecApp.cmd",
+      "dependencies/bin/JxrDecApp",
+    ], "JxrDecApp launcher");
+    const popplerBin = await requireExisting(destinationDir, [
       "dependencies/native/poppler/Library/bin",
       "dependencies/native/poppler/bin",
-    ]);
+    ], "Poppler binary directory");
     const libreOffice = await requireExisting(
       destinationDir,
       ["dependencies/libreoffice"],
@@ -524,11 +541,13 @@ export async function stageRuntime(opts: {
         nodeModules: toManifestPath(destinationDir, nodeModules),
         nodeResolver: toManifestPath(destinationDir, resolver),
         artifactToolPackage: toManifestPath(destinationDir, artifactToolPackage),
-        ...(pnpm ? { pnpm: toManifestPath(destinationDir, pnpm) } : {}),
-        ...(git ? { git: toManifestPath(destinationDir, git) } : {}),
-        ...(pdfinfo ? { pdfinfo: toManifestPath(destinationDir, pdfinfo) } : {}),
-        ...(pdftoppm ? { pdftoppm: toManifestPath(destinationDir, pdftoppm) } : {}),
-        ...(popplerBin ? { popplerBin: toManifestPath(destinationDir, popplerBin) } : {}),
+        pnpm: toManifestPath(destinationDir, pnpm),
+        git: toManifestPath(destinationDir, git),
+        pdfinfo: toManifestPath(destinationDir, pdfinfo),
+        pdftoppm: toManifestPath(destinationDir, pdftoppm),
+        heifConvert: toManifestPath(destinationDir, heifConvert),
+        jxrDecApp: toManifestPath(destinationDir, jxrDecApp),
+        popplerBin: toManifestPath(destinationDir, popplerBin),
         soffice: toManifestPath(destinationDir, soffice),
         libreOffice: toManifestPath(destinationDir, libreOffice),
         libreOfficeBinary: toManifestPath(destinationDir, libreOfficeBinary),
@@ -644,6 +663,69 @@ async function verifySofficeConversion(
   }
 }
 
+const MANAGED_NODE_IMPORTS = [
+  "@napi-rs/canvas",
+  "@viz-js/viz",
+  "docx",
+  "jpeg-js",
+  "lucide",
+  "marked",
+  "pdf-lib",
+  "pdfjs-dist/legacy/build/pdf.mjs",
+  "pixelmatch",
+  "playwright",
+  "pngjs",
+  "pptxgenjs",
+  "sharp",
+  "tesseract.js",
+] as const;
+
+async function verifyManagedNodeImports(
+  node: string,
+  env: Record<string, string>,
+  tempDir: string,
+): Promise<string> {
+  const probe = path.join(tempDir, "managed-node-imports.mjs");
+  await fs.writeFile(
+    probe,
+    `for (const specifier of ${JSON.stringify(MANAGED_NODE_IMPORTS)}) await import(specifier);\n` +
+      `console.log("${MANAGED_NODE_IMPORTS.length} managed packages");\n`,
+    "utf8",
+  );
+  return await commandVersion(node, [probe], env, tempDir);
+}
+
+async function verifyMacOSNativeArchitectures(
+  runtimeDir: string,
+  manifest: CoworkRuntimeManifest,
+  env: Record<string, string>,
+): Promise<string> {
+  const expected = manifest.asset === "macos-arm64" ? "arm64" : "x86_64";
+  const candidates = [
+    manifest.paths.node,
+    manifest.paths.python,
+    manifest.paths.git,
+    "dependencies/native/poppler/poppler/bin/pdfinfo",
+    "dependencies/native/libheif/libheif/bin/heif-dec",
+    "dependencies/native/jxrlib/jxrlib/bin/JxrDecApp",
+    manifest.paths.libreOfficeBinary,
+  ].filter((candidate): candidate is string => Boolean(candidate));
+  let verified = 0;
+  for (const candidate of candidates) {
+    const executable = resolveManifestPath(runtimeDir, candidate);
+    if (!(await fs.stat(executable).catch(() => null))) continue;
+    const description = await commandVersion("/usr/bin/file", ["-L", "-b", executable], env);
+    if (!description.includes("Mach-O") || !description.includes(expected)) {
+      throw new Error(`${candidate} is not a macOS ${expected} binary: ${description}`);
+    }
+    verified += 1;
+  }
+  if (verified < 4) {
+    throw new Error(`Only ${verified} native macOS entrypoints were available for architecture checks.`);
+  }
+  return `${verified} Mach-O entrypoints include ${expected}`;
+}
+
 export async function verifyRuntime(opts: {
   runtimeDir: string;
   deep?: boolean;
@@ -715,6 +797,7 @@ export async function verifyRuntime(opts: {
           "utf8",
         );
         checks.artifactToolImport = await commandVersion(node, [probe], env, tempDir);
+        checks.nodeLibraries = await verifyManagedNodeImports(node, env, tempDir);
       } finally {
         await fs.rm(tempDir, { recursive: true, force: true });
       }
@@ -725,10 +808,62 @@ export async function verifyRuntime(opts: {
           env,
         );
       }
+      if (manifest.paths.pnpm) {
+        checks.pnpmVersion = await commandVersion(
+          resolveManifestPath(runtimeDir, manifest.paths.pnpm),
+          ["--version"],
+          env,
+        );
+      }
+      if (manifest.paths.pdfinfo) {
+        checks.pdfinfoVersion = await commandVersion(
+          resolveManifestPath(runtimeDir, manifest.paths.pdfinfo),
+          ["-v"],
+          env,
+        );
+      }
+      if (manifest.paths.pdftoppm) {
+        checks.pdftoppmVersion = await commandVersion(
+          resolveManifestPath(runtimeDir, manifest.paths.pdftoppm),
+          ["-v"],
+          env,
+        );
+      }
+      if (manifest.paths.heifConvert) {
+        checks.libheifVersion = await commandVersion(
+          resolveManifestPath(runtimeDir, manifest.paths.heifConvert),
+          ["--version"],
+          env,
+        );
+      }
+      if (manifest.asset.startsWith("macos-")) {
+        checks.nativeArchitecture = await verifyMacOSNativeArchitectures(runtimeDir, manifest, env);
+      }
       if (manifest.paths.soffice) {
         const soffice = resolveManifestPath(runtimeDir, manifest.paths.soffice);
         checks.libreOfficeVersion = await commandVersion(soffice, ["--version"], env);
         checks.libreOfficeConversion = await verifySofficeConversion(soffice, env);
+      }
+      if (manifest.asset.startsWith("macos-") && manifest.paths.libreOffice) {
+        await execFileAsync(
+          "codesign",
+          [
+            "--verify",
+            "--deep",
+            "--strict",
+            path.join(
+              resolveManifestPath(runtimeDir, manifest.paths.libreOffice),
+              "LibreOffice.app",
+            ),
+          ],
+          {
+            env,
+            windowsHide: true,
+            timeout: 5 * 60_000,
+            maxBuffer: 8 * 1024 * 1024,
+          },
+        );
+        checks.libreOfficeSignature = "valid Developer ID seal";
       }
     } catch (error) {
       errors.push(error instanceof Error ? error.message : String(error));
