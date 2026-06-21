@@ -1,0 +1,32 @@
+{
+  "name": "@cowork/runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "cowork-runtime": "./src/cli.ts"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "stage": "bun src/cli.ts stage",
+    "build": "bun src/cli.ts build",
+    "verify": "bun src/cli.ts verify",
+    "install-runtime": "bun src/cli.ts install",
+    "download-runtime": "bun src/cli.ts download",
+    "test": "bun test",
+    "typecheck": "bunx tsc --noEmit",
+    "check": "bun run typecheck && bun test"
+  },
+  "dependencies": {
+    "archiver": "8.0.0",
+    "yauzl": "3.4.0"
+  },
+  "devDependencies": {
+    "@types/archiver": "8.0.0",
+    "@types/bun": "1.3.14",
+    "@types/yauzl": "3.4.0",
+    "typescript": "6.0.3"
+  }
+}

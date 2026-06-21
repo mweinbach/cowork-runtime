@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "components": [
+    {
+      "id": "node-environment",
+      "strategy": "copied",
+      "source": "dependencies/node",
+      "destination": "dependencies/node",
+      "note": "Initial bootstrap copies OpenAI's pinned Node binary and package tree. Replace with a Cowork-owned Node plus lockfile build when the private artifact package has a supported input artifact."
+    },
+    {
+      "id": "python-environment",
+      "strategy": "copied",
+      "source": "dependencies/python",
+      "destination": "dependencies/python",
+      "note": "Initial bootstrap copies the pinned portable Python environment. This can later be assembled from Python plus a hashed requirements lock."
+    },
+    {
+      "id": "native-tools",
+      "strategy": "copied",
+      "source": "dependencies/native",
+      "destination": "dependencies/native",
+      "note": "Platform-native Git, Poppler, libheif, and jxrlib payloads are copied until each has a Cowork-owned fetch/build recipe."
+    },
+    {
+      "id": "productivity-plugins",
+      "strategy": "copied",
+      "source": "plugins/openai-primary-runtime",
+      "destination": "plugins/openai-primary-runtime",
+      "note": "Curated plugin files are copied directly because they are release inputs rather than locally buildable binaries."
+    },
+    {
+      "id": "cowork-productivity-overlays",
+      "strategy": "built",
+      "source": "runtime-overlays/plugins",
+      "destination": "plugins/openai-primary-runtime/plugins",
+      "note": "Cowork-owned skill guidance, render helpers, templates, and QA scripts are overlaid onto matching upstream plugins during staging."
+    },
+    {
+      "id": "runtime-launchers",
+      "strategy": "generated",
+      "destination": "dependencies/bin",
+      "note": "Cowork generates relocatable launchers for pnpm and native utilities for each platform."
+    },
+    {
+      "id": "node-module-resolver",
+      "strategy": "built",
+      "source": "runtime-support/node-resolver",
+      "destination": "cowork/node-resolver",
+      "note": "Cowork-owned resolver source is packaged into the runtime so ESM builders can import managed dependencies from scratch directories."
+    },
+    {
+      "id": "source-provenance",
+      "strategy": "generated",
+      "destination": "provenance/codex-primary-runtime.json",
+      "note": "The source runtime manifest is retained as provenance; runtime.json is Cowork-owned."
+    }
+  ]
+}
