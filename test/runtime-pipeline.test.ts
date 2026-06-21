@@ -118,6 +118,11 @@ async function fakeMacSourceRuntime(root: string): Promise<void> {
     '{"name":"@oai/artifact-tool","version":"2.8.13"}\n',
   );
   await writeExecutable(root, "dependencies/python/bin/python3");
+  await writeFile(root, "dependencies/python/lib/pkgconfig/python-3.12.pc");
+  await fs.symlink(
+    "/private/build/python/lib/pkgconfig/python-3.12.pc",
+    path.join(root, "dependencies", "python", "lib", "pkgconfig", "python3.pc"),
+  );
   await writeExecutable(root, "dependencies/native/git/bin/git");
   await writeExecutable(
     root,
@@ -220,6 +225,11 @@ describe("unified runtime pipeline", () => {
       .toContain("../native/libheif/libheif/bin/heif-convert");
     expect(await fs.readFile(path.join(staged, "dependencies", "bin", "JxrDecApp"), "utf8"))
       .toContain("../native/jxrlib/jxrlib/bin/JxrDecApp");
+    expect(
+      await fs.readlink(
+        path.join(staged, "dependencies", "python", "lib", "pkgconfig", "python3.pc"),
+      ),
+    ).toBe("python-3.12.pc");
 
     const built = await buildRuntimeArchive({ runtimeDir: staged, outputFile: archive });
     const installed = await installRuntimeArchive({

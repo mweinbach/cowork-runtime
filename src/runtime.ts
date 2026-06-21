@@ -314,6 +314,51 @@ function isPathInside(parent: string, candidate: string): boolean {
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
+async function normalizeRuntimeSymlinks(runtimeDir: string): Promise<{
+  validated: number;
+  rewritten: number;
+}> {
+  let validated = 0;
+  let rewritten = 0;
+  const visit = async (directory: string): Promise<void> => {
+    const entries = await fs.readdir(directory, { withFileTypes: true });
+    for (const entry of entries) {
+      const candidate = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        await visit(candidate);
+        continue;
+      }
+      if (!entry.isSymbolicLink()) continue;
+
+      let target = await fs.readlink(candidate);
+      if (path.isAbsolute(target)) {
+        const siblingTarget = path.basename(target);
+        const siblingPath = path.join(directory, siblingTarget);
+        if (!(await fs.stat(siblingPath).catch(() => null))) {
+          throw new Error(
+            `Runtime symlink ${candidate} has an absolute target that cannot be normalized: ${target}`,
+          );
+        }
+        await fs.rm(candidate);
+        await fs.symlink(siblingTarget, candidate);
+        target = siblingTarget;
+        rewritten += 1;
+      }
+
+      const resolvedTarget = path.resolve(directory, target);
+      if (!isPathInside(runtimeDir, resolvedTarget)) {
+        throw new Error(`Runtime symlink escapes the payload: ${candidate} -> ${target}`);
+      }
+      if (!(await fs.stat(resolvedTarget).catch(() => null))) {
+        throw new Error(`Runtime symlink is broken: ${candidate} -> ${target}`);
+      }
+      validated += 1;
+    }
+  };
+  await visit(runtimeDir);
+  return { validated, rewritten };
+}
+
 export async function stageRuntime(opts: {
   sourceDir: string;
   destinationDir: string;
@@ -421,6 +466,11 @@ export async function stageRuntime(opts: {
         throw new Error(`No builder is registered for component ${component.id}.`);
       }
     }
+
+    const symlinks = await normalizeRuntimeSymlinks(destinationDir);
+    opts.log?.(
+      `Validated ${symlinks.validated} contained runtime symlinks; normalized ${symlinks.rewritten} absolute targets.`,
+    );
 
     const bin = await requireExisting(destinationDir, ["dependencies/bin"], "dependencies/bin");
     const node = await requireExisting(
