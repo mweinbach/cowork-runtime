@@ -139,6 +139,14 @@ The executable verification imports the managed Node and Python stacks, checks p
 
 The build creates `dist/cowork-runtime-macos-arm64.zip` and its `.sha256` sidecar.
 
+Production signing can remain isolated in GitHub. Sign the locally staged payload
+with a disposable staging key, upload the ZIP, checksum, and staging public key to
+a private draft release named `runtime-staging-macos-arm64-<version>`, then dispatch
+the **Publish macOS Runtime** workflow. It verifies the staging signature and exact
+tree, re-seals with the repository production key, runs native executable and clean
+install checks, publishes without clobbering existing assets, verifies the public
+download path, and deletes the private staging release.
+
 ## Test the installer locally
 
 Use a temporary home first:

@@ -8,7 +8,7 @@ import { ZipArchive } from "archiver";
 import yauzl, { type Entry, type ZipFile } from "yauzl";
 
 import { readRuntimeManifest } from "./manifest";
-import { writeRuntimeIntegrity, type RuntimeKeyMaterial } from "./integrity";
+import type { RuntimeKeyMaterial } from "./integrity";
 import { verifyRuntime } from "./runtime";
 
 const MAX_ARCHIVE_ENTRIES = 200_000;
@@ -109,11 +109,6 @@ export async function buildRuntimeArchive(opts: {
   if (manifest.schemaVersion !== 2 || manifest.integrity?.keyId !== opts.signingKey.keyId) {
     throw new Error("Runtime signing key does not match the schema-2 runtime manifest.");
   }
-  await writeRuntimeIntegrity({
-    root: runtimeDir,
-    manifest,
-    privateKey: opts.signingKey.privateKey,
-  });
   const publicKey = createPublicKey(opts.signingKey.privateKey).export({
     format: "pem",
     type: "spki",

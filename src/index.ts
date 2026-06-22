@@ -5,5 +5,6 @@ export * from "./libreoffice";
 export * from "./manifest";
 export * from "./integrity";
 export * from "./platform";
+export * from "./reseal";
 export * from "./runtime";
 export * from "./types";

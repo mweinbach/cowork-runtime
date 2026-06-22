@@ -52,6 +52,14 @@ gh release create $Tag `
 
 For a multi-platform release, attach every verified ZIP/checksum pair to the same tag.
 
+For macOS ARM64, use `.github/workflows/release-macos-runtime.yml` so the production
+private key never leaves GitHub. The workflow accepts only a private draft staging
+release named `runtime-staging-macos-arm64-<version>`, verifies its disposable
+staging signature, re-seals and exercises the payload on a native ARM64 runner,
+refuses to replace an existing public asset, and verifies a fresh public download
+before deleting the staging release. The archive builder also verifies the existing
+signature before packaging; it never silently signs a changed staging tree.
+
 ## Verify the published release
 
 Download into a clean directory instead of trusting the upload response:

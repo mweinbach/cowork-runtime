@@ -15,6 +15,7 @@ import {
 } from "./install";
 import { prepareLibreOfficeInput } from "./libreoffice";
 import { isRuntimeAssetId, resolveRuntimeAssetForHost, runtimeAssetFileName } from "./platform";
+import { resealRuntime } from "./reseal";
 import { buildRuntimeEnv, stageRuntime, verifyRuntime } from "./runtime";
 
 const args = process.argv.slice(2);
@@ -34,6 +35,7 @@ Commands:
   prepare-libreoffice  Download, verify, and normalize the private LibreOffice payload
   stage     Assemble a platform payload from a source runtime
   build     Build a ZIP and SHA-256 sidecar from a staged payload
+  reseal    Verify a staged runtime, then replace its signing identity atomically
   verify    Verify a staged or installed runtime
   install   Install a local release ZIP into ~/.cowork/runtime/YYYY-MM-DD
   download  Download and install a GitHub release
@@ -46,6 +48,7 @@ Examples:
   bun run stage -- --source C:\\Users\\me\\.cache\\codex-runtimes\\codex-primary-runtime --asset win-x86 --version 2026-06-22 --force
   bun run stage -- --source /runtime --asset linux-x86 --version 2026-06-22 --component-plan recipes/linux-x86/runtime-components.json --force
   bun run build -- --runtime payloads/win-x86
+  bun src/cli.ts reseal --runtime payloads/macos-arm64 --source-public-key staging.pub.pem --source-key-id staging --asset macos-arm64 --version 2026-06-22
   bun src/cli.ts install --archive dist/cowork-runtime-win-x86.zip --checksum dist/cowork-runtime-win-x86.zip.sha256
   bun src/cli.ts download --repo owner/cowork-runtime --version 2026-06-22
 `;
@@ -64,8 +67,12 @@ function flag(name: string): boolean {
 }
 
 function runtimeAsset() {
+  return optionalRuntimeAsset() ?? resolveRuntimeAssetForHost();
+}
+
+function optionalRuntimeAsset() {
   const requested = option("--asset");
-  if (!requested) return resolveRuntimeAssetForHost();
+  if (!requested) return undefined;
   if (!isRuntimeAssetId(requested)) throw new Error(`Unknown runtime asset: ${requested}`);
   return requested;
 }
@@ -93,6 +100,15 @@ async function trustedKeys(): Promise<TrustedRuntimeKeys> {
     option("--public-key") ??
     process.env.COWORK_RUNTIME_PUBLIC_KEY_FILE ??
     DEFAULT_PUBLIC_KEY_FILE;
+  return { [keyId]: await fs.readFile(path.resolve(keyFile)) };
+}
+
+async function sourceTrustedKeys(): Promise<TrustedRuntimeKeys> {
+  const keyId = option("--source-key-id");
+  const keyFile = option("--source-public-key");
+  if (!keyId || !keyFile) {
+    throw new Error("reseal requires --source-key-id and --source-public-key.");
+  }
   return { [keyId]: await fs.readFile(path.resolve(keyFile)) };
 }
 
@@ -171,6 +187,21 @@ async function main(): Promise<void> {
         log: console.log,
       });
       console.log(JSON.stringify(result, null, 2));
+      return;
+    }
+    case "reseal": {
+      const runtimeDir = option("--runtime");
+      if (!runtimeDir) throw new Error("reseal requires --runtime.");
+      const expectedAsset = optionalRuntimeAsset();
+      const manifest = await resealRuntime({
+        runtimeDir,
+        sourceTrustedKeys: await sourceTrustedKeys(),
+        signingKey: await signingKey(),
+        ...(option("--version") ? { expectedVersion: option("--version") } : {}),
+        ...(expectedAsset ? { expectedAsset } : {}),
+        execute: !flag("--no-execute"),
+      });
+      console.log(JSON.stringify({ runtimeDir: path.resolve(runtimeDir), manifest }, null, 2));
       return;
     }
     case "verify": {

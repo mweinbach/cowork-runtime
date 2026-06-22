@@ -13,6 +13,7 @@ import {
   resolveCurrentRuntime,
 } from "../src/install";
 import { readRuntimeManifest } from "../src/manifest";
+import { resealRuntime } from "../src/reseal";
 import {
   buildRuntimeEnv as buildRuntimeEnvImpl,
   stageRuntime as stageRuntimeImpl,
@@ -28,6 +29,11 @@ const TEST_KEY_PAIR = generateKeyPairSync("ed25519", {
 });
 const signingKey = { keyId: TEST_KEY_ID, privateKey: TEST_KEY_PAIR.privateKey };
 const trustedKeys = { [TEST_KEY_ID]: TEST_KEY_PAIR.publicKey };
+const TARGET_KEY_ID = "runtime-pipeline-target";
+const TARGET_KEY_PAIR = generateKeyPairSync("ed25519", {
+  privateKeyEncoding: { format: "pem", type: "pkcs8" },
+  publicKeyEncoding: { format: "pem", type: "spki" },
+});
 
 const stageRuntime = (
   opts: Omit<Parameters<typeof stageRuntimeImpl>[0], "signingKey">,
@@ -201,6 +207,58 @@ afterEach(async () => {
 });
 
 describe("unified runtime pipeline", () => {
+  test("re-seals only after the source signature and exact tree verify", async () => {
+    const root = await tempRoot("reseal");
+    const source = path.join(root, "source");
+    const staged = path.join(root, "payload");
+    await fakeSourceRuntime(source);
+    const libreOffice = await fakeLibreOfficeInput(root);
+    await stageRuntime({
+      sourceDir: source,
+      destinationDir: staged,
+      asset: "win-x86",
+      version: "2026-06-22",
+      ...libreOffice,
+    });
+
+    await resealRuntime({
+      runtimeDir: staged,
+      sourceTrustedKeys: trustedKeys,
+      signingKey: { keyId: TARGET_KEY_ID, privateKey: TARGET_KEY_PAIR.privateKey },
+      expectedVersion: "2026-06-22",
+      expectedAsset: "win-x86",
+      execute: false,
+    });
+
+    const verification = await verifyRuntimeImpl({
+      runtimeDir: staged,
+      deep: true,
+      trustedKeys: { [TARGET_KEY_ID]: TARGET_KEY_PAIR.publicKey },
+    });
+    expect(verification.errors).toEqual([]);
+    expect(verification.checks.integrity).toContain(TARGET_KEY_ID);
+    await expect(
+      verifyRuntimeImpl({ runtimeDir: staged, trustedKeys }),
+    ).resolves.toMatchObject({ ok: false });
+
+    await fs.writeFile(path.join(staged, "dependencies", "node", "bin", "node.exe"), "hacked!");
+    await expect(
+      buildRuntimeArchiveImpl({
+        runtimeDir: staged,
+        outputFile: path.join(root, "must-not-build.zip"),
+        signingKey: { keyId: TARGET_KEY_ID, privateKey: TARGET_KEY_PAIR.privateKey },
+      }),
+    ).rejects.toThrow("SHA-256 mismatch");
+    await expect(
+      resealRuntime({
+        runtimeDir: staged,
+        sourceTrustedKeys: { [TARGET_KEY_ID]: TARGET_KEY_PAIR.publicKey },
+        signingKey,
+        execute: false,
+      }),
+    ).rejects.toThrow("Refusing to re-seal an unverified runtime");
+  });
+
   test("round-trips relocatable macOS ARM64 launchers and symlinks", async () => {
     if (process.platform === "win32") return;
 
