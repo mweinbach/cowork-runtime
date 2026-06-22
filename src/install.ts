@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { extractRuntimeArchive, sha256File } from "./archive";
+import type { TrustedRuntimeKeys } from "./integrity";
 import { readRuntimeManifest } from "./manifest";
 import { assertHostCompatible, assertRuntimeVersion } from "./platform";
 import { verifyRuntime } from "./runtime";
@@ -110,6 +111,7 @@ export async function installRuntimeArchive(opts: {
   force?: boolean;
   activate?: boolean;
   host?: RuntimeHost;
+  trustedKeys: TrustedRuntimeKeys;
   log?: (line: string) => void;
 }): Promise<{ runtimeDir: string; version: string; activated: boolean }> {
   const archivePath = path.resolve(opts.archivePath);
@@ -131,7 +133,11 @@ export async function installRuntimeArchive(opts: {
     const manifest = await readRuntimeManifest(staging);
     assertRuntimeVersion(manifest.version);
     assertHostCompatible(manifest.asset, opts.host ?? process);
-    const verification = await verifyRuntime({ runtimeDir: staging, deep: true });
+    const verification = await verifyRuntime({
+      runtimeDir: staging,
+      deep: true,
+      trustedKeys: opts.trustedKeys,
+    });
     if (!verification.ok) {
       throw new Error(`Extracted runtime failed verification:\n${verification.errors.join("\n")}`);
     }

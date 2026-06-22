@@ -18,6 +18,14 @@ import {
   readRuntimeManifest,
   writeRuntimeManifest,
 } from "./manifest";
+import {
+  RUNTIME_INTEGRITY_MANIFEST_FILE,
+  RUNTIME_INTEGRITY_SIGNATURE_FILE,
+  verifyRuntimeIntegrity,
+  writeRuntimeIntegrity,
+  type RuntimeKeyMaterial,
+  type TrustedRuntimeKeys,
+} from "./integrity";
 import type {
   CoworkRuntimeManifest,
   RuntimeAssetId,
@@ -170,7 +178,16 @@ async function payloadStats(runtimeDir: string): Promise<{ fileCount: number; un
     const entries = await fs.readdir(dir, { withFileTypes: true });
     entries.sort((left, right) => left.name.localeCompare(right.name));
     for (const entry of entries) {
-      if (dir === runtimeDir && entry.name === RUNTIME_MANIFEST_FILE) continue;
+      if (
+        dir === runtimeDir &&
+        [
+          RUNTIME_MANIFEST_FILE,
+          RUNTIME_INTEGRITY_MANIFEST_FILE,
+          RUNTIME_INTEGRITY_SIGNATURE_FILE,
+        ].includes(entry.name)
+      ) {
+        continue;
+      }
       const absolute = path.join(dir, entry.name);
       if (entry.isDirectory()) {
         await visit(absolute);
@@ -371,6 +388,7 @@ export async function stageRuntime(opts: {
   componentPlanPath?: string;
   rustcPath?: string;
   windowsSofficeShimPath?: string;
+  signingKey: { keyId: string; privateKey: RuntimeKeyMaterial };
   log?: (line: string) => void;
 }): Promise<CoworkRuntimeManifest> {
   assertRuntimeVersion(opts.version);
@@ -558,7 +576,7 @@ export async function stageRuntime(opts: {
     }
     const stats = await payloadStats(destinationDir);
     const manifest: CoworkRuntimeManifest = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       version: opts.version,
       createdAt: opts.createdAt ?? new Date().toISOString(),
       asset: opts.asset,
@@ -609,8 +627,19 @@ export async function stageRuntime(opts: {
         libreOfficeBinary: toManifestPath(destinationDir, libreOfficeBinary),
       },
       payload: stats,
+      integrity: {
+        algorithm: "Ed25519",
+        keyId: opts.signingKey.keyId,
+        manifest: RUNTIME_INTEGRITY_MANIFEST_FILE,
+        signature: RUNTIME_INTEGRITY_SIGNATURE_FILE,
+      },
     };
     await writeRuntimeManifest(destinationDir, manifest);
+    await writeRuntimeIntegrity({
+      root: destinationDir,
+      manifest,
+      privateKey: opts.signingKey.privateKey,
+    });
     opts.log?.(`Staged ${stats.fileCount} files (${stats.unpackedBytes} bytes).`);
     return manifest;
   } catch (error) {
@@ -623,9 +652,11 @@ export async function buildRuntimeEnv(
   runtimeDir: string,
   baseEnv: Record<string, string | undefined> = process.env,
   platform: NodeJS.Platform = process.platform,
+  trustedKeys: TrustedRuntimeKeys = {},
 ): Promise<Record<string, string>> {
   const resolvedRuntimeDir = path.resolve(runtimeDir);
   const manifest = await readRuntimeManifest(resolvedRuntimeDir);
+  await verifyRuntimeIntegrity({ root: resolvedRuntimeDir, manifest, trustedKeys });
   const absolute = (relative: string): string => resolveManifestPath(resolvedRuntimeDir, relative);
   const pathKey = pathKeyForEnv(baseEnv);
   const pythonDir = path.dirname(absolute(manifest.paths.python));
@@ -638,6 +669,7 @@ export async function buildRuntimeEnv(
     ...(manifest.paths.popplerBin ? [absolute(manifest.paths.popplerBin)] : []),
   ];
   const nodeModules = absolute(manifest.paths.nodeModules);
+  const pnpmHoistedModules = path.join(nodeModules, ".pnpm", "node_modules");
   const resolverOption = `--import=${pathToFileURL(absolute(manifest.paths.nodeResolver)).href}`;
 
   const result: Record<string, string> = {};
@@ -648,7 +680,10 @@ export async function buildRuntimeEnv(
   const currentPath = baseEnv[pathKey]?.split(delimiter) ?? [];
   const currentNodePath = baseEnv.NODE_PATH?.split(delimiter) ?? [];
   result[pathKey] = dedupePathEntries([...pathDirs, ...currentPath], platform).join(delimiter);
-  result.NODE_PATH = dedupePathEntries([nodeModules, ...currentNodePath], platform).join(delimiter);
+  result.NODE_PATH = dedupePathEntries(
+    [nodeModules, pnpmHoistedModules, ...currentNodePath],
+    platform,
+  ).join(delimiter);
   result.NODE_OPTIONS = appendNodeOption(baseEnv.NODE_OPTIONS, resolverOption);
   result.PYTHONDONTWRITEBYTECODE = "1";
   result.COWORK_RUNTIME_DIR = resolvedRuntimeDir;
@@ -787,6 +822,7 @@ export async function verifyRuntime(opts: {
   deep?: boolean;
   execute?: boolean;
   host?: RuntimeHost;
+  trustedKeys?: TrustedRuntimeKeys;
 }): Promise<RuntimeVerification> {
   const runtimeDir = path.resolve(opts.runtimeDir);
   const errors: string[] = [];
@@ -802,6 +838,17 @@ export async function verifyRuntime(opts: {
       errors: [error instanceof Error ? error.message : String(error)],
       checks,
     };
+  }
+
+  try {
+    const integrity = await verifyRuntimeIntegrity({
+      root: runtimeDir,
+      manifest,
+      trustedKeys: opts.trustedKeys ?? {},
+    });
+    checks.integrity = `${integrity.fileCount} files signed by ${integrity.keyId}`;
+  } catch (error) {
+    errors.push(error instanceof Error ? error.message : String(error));
   }
 
   for (const [name, relative] of Object.entries(manifest.paths)) {
@@ -831,7 +878,7 @@ export async function verifyRuntime(opts: {
   if (opts.execute && errors.length === 0) {
     try {
       assertHostCompatible(manifest.asset, opts.host ?? process);
-      const env = await buildRuntimeEnv(runtimeDir);
+      const env = await buildRuntimeEnv(runtimeDir, process.env, process.platform, opts.trustedKeys);
       const node = resolveManifestPath(runtimeDir, manifest.paths.node);
       const python = resolveManifestPath(runtimeDir, manifest.paths.python);
       checks.nodeVersion = await commandVersion(node, ["--version"], env);

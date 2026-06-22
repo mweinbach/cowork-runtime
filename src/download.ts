@@ -7,6 +7,7 @@ import { pipeline } from "node:stream/promises";
 import type { ReadableStream as NodeWebReadableStream } from "node:stream/web";
 
 import { installRuntimeArchive } from "./install";
+import type { TrustedRuntimeKeys } from "./integrity";
 import {
   assertRuntimeVersion,
   resolveRuntimeAssetForHost,
@@ -112,6 +113,7 @@ export async function downloadAndInstallRuntime(opts: {
   host?: RuntimeHost;
   fetchImpl?: typeof fetch;
   log?: (line: string) => void;
+  trustedKeys: TrustedRuntimeKeys;
 }): Promise<{ runtimeDir: string; version: string; activated: boolean }> {
   const downloaded = await downloadRuntimeRelease(opts);
   try {
@@ -123,6 +125,7 @@ export async function downloadAndInstallRuntime(opts: {
       activate: opts.activate,
       host: opts.host,
       log: opts.log,
+      trustedKeys: opts.trustedKeys,
     });
   } finally {
     await downloaded.cleanup();

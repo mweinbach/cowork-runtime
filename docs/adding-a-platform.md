@@ -169,5 +169,5 @@ All platform assets for a date share one release tag. Build each asset on its na
 - [ ] Deep and executable verification pass after clean extraction.
 - [ ] Representative artifact workflow passes.
 - [ ] Managed headless `soffice` rejects UI/printing modes and passes a real conversion.
-- [ ] Release asset and SHA-256 sidecar published.
+- [ ] Release asset and SHA-256 sidecar published; schema-2 signature verifies with the pinned release key.
 - [ ] Harness selection test added.

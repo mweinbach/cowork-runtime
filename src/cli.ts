@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { buildRuntimeArchive } from "./archive";
+import type { TrustedRuntimeKeys } from "./integrity";
 import { downloadAndInstallRuntime } from "./download";
 import {
   activateInstalledRuntime,
@@ -18,6 +19,13 @@ import { buildRuntimeEnv, stageRuntime, verifyRuntime } from "./runtime";
 
 const args = process.argv.slice(2);
 const command = args.shift();
+const DEFAULT_SIGNING_KEY_ID = "cowork-runtime-release-1";
+const DEFAULT_PUBLIC_KEY_FILE = path.resolve(
+  import.meta.dirname,
+  "..",
+  "keys",
+  "cowork-runtime-release-1.pub.pem",
+);
 
 function usage(): string {
   return `Cowork runtime builder and installer
@@ -35,11 +43,11 @@ Commands:
 
 Examples:
   bun src/cli.ts prepare-libreoffice --asset win-x86 --force
-  bun run stage -- --source C:\\Users\\me\\.cache\\codex-runtimes\\codex-primary-runtime --asset win-x86 --version 2026-06-21 --force
-  bun run stage -- --source /runtime --asset linux-x86 --version 2026-06-21 --component-plan recipes/linux-x86/runtime-components.json --force
+  bun run stage -- --source C:\\Users\\me\\.cache\\codex-runtimes\\codex-primary-runtime --asset win-x86 --version 2026-06-22 --force
+  bun run stage -- --source /runtime --asset linux-x86 --version 2026-06-22 --component-plan recipes/linux-x86/runtime-components.json --force
   bun run build -- --runtime payloads/win-x86
   bun src/cli.ts install --archive dist/cowork-runtime-win-x86.zip --checksum dist/cowork-runtime-win-x86.zip.sha256
-  bun src/cli.ts download --repo owner/cowork-runtime --version 2026-06-21
+  bun src/cli.ts download --repo owner/cowork-runtime --version 2026-06-22
 `;
 }
 
@@ -64,6 +72,28 @@ function runtimeAsset() {
 
 function today(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+async function signingKey(): Promise<{ keyId: string; privateKey: Buffer }> {
+  const keyId =
+    option("--key-id") ?? process.env.COWORK_RUNTIME_SIGNING_KEY_ID ?? DEFAULT_SIGNING_KEY_ID;
+  const keyFile = option("--signing-key") ?? process.env.COWORK_RUNTIME_SIGNING_KEY_FILE;
+  if (!keyId || !keyFile) {
+    throw new Error(
+      "Signed schema-2 runtimes require --signing-key or COWORK_RUNTIME_SIGNING_KEY_FILE.",
+    );
+  }
+  return { keyId, privateKey: await fs.readFile(path.resolve(keyFile)) };
+}
+
+async function trustedKeys(): Promise<TrustedRuntimeKeys> {
+  const keyId =
+    option("--key-id") ?? process.env.COWORK_RUNTIME_SIGNING_KEY_ID ?? DEFAULT_SIGNING_KEY_ID;
+  const keyFile =
+    option("--public-key") ??
+    process.env.COWORK_RUNTIME_PUBLIC_KEY_FILE ??
+    DEFAULT_PUBLIC_KEY_FILE;
+  return { [keyId]: await fs.readFile(path.resolve(keyFile)) };
 }
 
 async function checksumFromFile(checksumPath: string, archivePath: string): Promise<string> {
@@ -106,6 +136,7 @@ async function main(): Promise<void> {
         destinationDir,
         asset,
         version: option("--version") ?? today(),
+        signingKey: await signingKey(),
         force: flag("--force"),
         ...(option("--component-plan")
           ? { componentPlanPath: path.resolve(option("--component-plan") as string) }
@@ -135,6 +166,7 @@ async function main(): Promise<void> {
       const result = await buildRuntimeArchive({
         runtimeDir,
         outputFile,
+        signingKey: await signingKey(),
         ...(compression ? { compressionLevel: Number(compression) } : {}),
         log: console.log,
       });
@@ -148,6 +180,7 @@ async function main(): Promise<void> {
         runtimeDir,
         deep: flag("--deep"),
         execute: flag("--execute"),
+        trustedKeys: await trustedKeys(),
       });
       console.log(JSON.stringify(result, null, 2));
       if (!result.ok) process.exitCode = 1;
@@ -165,6 +198,7 @@ async function main(): Promise<void> {
         force: flag("--force"),
         activate: !flag("--no-activate"),
         log: console.log,
+        trustedKeys: await trustedKeys(),
       });
       console.log(JSON.stringify(result, null, 2));
       return;
@@ -181,6 +215,7 @@ async function main(): Promise<void> {
         force: flag("--force"),
         activate: !flag("--no-activate"),
         log: console.log,
+        trustedKeys: await trustedKeys(),
       });
       console.log(JSON.stringify(result, null, 2));
       return;
@@ -198,7 +233,7 @@ async function main(): Promise<void> {
     case "env": {
       const runtimeDir = option("--runtime") ?? (await resolveCurrentRuntime(option("--home")));
       if (!runtimeDir) throw new Error("No current runtime is active.");
-      const env = await buildRuntimeEnv(runtimeDir, {});
+      const env = await buildRuntimeEnv(runtimeDir, {}, process.platform, await trustedKeys());
       console.log(JSON.stringify(env, null, 2));
       return;
     }

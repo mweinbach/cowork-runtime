@@ -60,12 +60,20 @@ Do not repair an installed runtime with `pip install`. Update the recipe and pub
 The runtime is incomplete or damaged. Do not fall back to a host LibreOffice installation.
 
 - Check that `COWORK_RUNTIME_SOFFICE` points to `dependencies/bin/soffice` (or `soffice.exe`) inside the active version.
+- Check that `COWORK_RUNTIME_POPPLER_BIN` points to the signed Poppler directory; document rendering intentionally does not fall back to host tools.
+
 - Run `cowork-runtime verify --deep --execute`; it performs a real PDF conversion.
 - Reinstall the release if a manifest path or payload count is wrong.
 - Activate the retained fallback version if the latest release fails.
 - If building locally, rerun `prepare-libreoffice`, then stage and rebuild the full ZIP.
 
 The raw `dependencies/libreoffice/program` directory must remain off `PATH`. Never invoke it directly to bypass the headless policy launcher.
+
+## Runtime integrity or schema error
+
+- Schema-1 runtimes are intentionally diagnostics-only; install a new immutable schema-2 release rather than editing the old directory.
+- A signature, hash, size, missing-file, or unexpected-file error means execution was blocked before the entrypoint ran. Reinstall or roll back; never update the local integrity manifest to match changed bytes.
+- If a recursive watcher reports a mutation or overflow, trust is invalidated and the complete signed tree must pass again before execution.
 
 ## Native command fails after relocation
 

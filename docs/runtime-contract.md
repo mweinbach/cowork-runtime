@@ -43,6 +43,8 @@ Host selection is implemented in [`src/platform.ts`](../src/platform.ts). Unsupp
 
 ```text
 runtime.json
+runtime-integrity.json
+runtime-integrity.sig
 provenance/
   codex-primary-runtime.json
 cowork/
@@ -59,7 +61,7 @@ The layout is relocatable. Launchers and resolver hooks derive paths from their 
 
 ## Manifest
 
-`runtime.json` uses `schemaVersion: 1` and contains:
+Trusted runtimes use `runtime.json` `schemaVersion: 2`. Schema 1 remains readable for diagnostics and migration messages but must never be executed. Schema 2 contains:
 
 | Field | Meaning |
 | --- | --- |
@@ -72,6 +74,9 @@ The layout is relocatable. Launchers and resolver hooks derive paths from their 
 | `versions` | Human-readable Node, Python, and package-manager versions. |
 | `paths` | POSIX-style relative paths to runtime entrypoints. |
 | `payload` | Expected file count and unpacked byte count for deep verification. |
+| `integrity` | Ed25519 key ID plus the fixed integrity-manifest and signature filenames. |
+
+`runtime-integrity.json` is signed over its exact canonical bytes. It records every payload file and symlink, size, SHA-256, and the closure associated with every component and public entrypoint. Insertions, deletions, replacements, signature changes, and unsafe symlinks all fail verification.
 
 All manifest paths are normalized relative paths. Absolute paths, backslashes, and traversal are rejected.
 
@@ -83,7 +88,7 @@ An archive is installed as follows:
 
 1. Hash the downloaded ZIP and compare it with the `.sha256` asset.
 2. Extract into `~/.cowork/runtime/.staging-<uuid>` with containment and size limits.
-3. Parse `runtime.json`, check host compatibility, and perform deep verification.
+3. Parse `runtime.json`, require schema 2, verify the Ed25519 signature against an application-pinned public key, check the exact tree, and check host compatibility.
 4. Atomically rename the staging directory to `~/.cowork/runtime/YYYY-MM-DD`.
 5. Write `~/.cowork/runtime/current.json` to activate it.
 
@@ -100,6 +105,7 @@ COWORK_RUNTIME_ASSET
 COWORK_RUNTIME_BIN
 COWORK_RUNTIME_NODE
 COWORK_RUNTIME_PYTHON
+COWORK_RUNTIME_GIT
 COWORK_RUNTIME_NODE_MODULES
 COWORK_RUNTIME_NODE_RESOLVER
 COWORK_RUNTIME_POPPLER_BIN
@@ -108,7 +114,7 @@ COWORK_RUNTIME_LIBREOFFICE_DIR
 COWORK_RUNTIME_LIBREOFFICE_BINARY
 ```
 
-The result also prepends runtime entrypoints to `PATH`, prepends the package tree to `NODE_PATH`, adds the Cowork resolver through `NODE_OPTIONS=--import=...`, forces `PYTHONDONTWRITEBYTECODE=1`, and disables synchronous LibreOffice printer detection. The private LibreOffice program directory is intentionally absent from `PATH`.
+The result also prepends runtime entrypoints to `PATH`, prepends both the top-level package tree and `.pnpm/node_modules` hoisted closure to `NODE_PATH`, adds the Cowork resolver through `NODE_OPTIONS=--import=...`, forces `PYTHONDONTWRITEBYTECODE=1`, and disables synchronous LibreOffice printer detection. The private LibreOffice program directory is intentionally absent from `PATH`.
 
 Marketplace skill helpers use `COWORK_RUNTIME_NODE_MODULES` to find supplied packages. The runtime does not contain or patch skill files, and consumers must never use the runtime as a plugin discovery root.
 
@@ -116,8 +122,8 @@ Do not mutate global `process.env` as the integration mechanism. Construct a per
 
 ## Verification levels
 
-- Shallow verification checks the manifest and required paths.
-- Deep verification recomputes payload file count and unpacked bytes before and after executable probes.
+- Integrity verification authenticates the signed manifest and recomputes the exact file set, file types, sizes, and SHA-256 hashes.
+- Deep verification additionally recomputes payload file count and unpacked bytes before and after executable probes.
 - Executable verification launches Node, Python, and pnpm; imports the Python document stack, `@oai/artifact-tool`, and the public managed Node packages; checks Git, Poppler, and libheif; and performs a real HTML-to-PDF conversion.
 - macOS executable verification also confirms the required Mach-O architecture and validates LibreOffice's nested Developer ID signatures after relocation.
 
@@ -127,6 +133,6 @@ A release requires all three on the target host.
 
 Every complete runtime contains a private, platform-native LibreOffice conversion engine and a Cowork-owned headless policy launcher. Manifest paths identify the public launcher, private engine root, and private console executable. A missing path or failed conversion makes the runtime invalid.
 
-Host LibreOffice installations are never searched. Consumers use `COWORK_RUNTIME_SOFFICE` or the bare `soffice` name resolved from the runtime `bin` directory. Direct invocation of the private engine bypasses policy and is unsupported.
+Host LibreOffice and Poppler installations are never searched. Consumers resolve `COWORK_RUNTIME_SOFFICE` and `COWORK_RUNTIME_POPPLER_BIN` directly. Direct invocation of the private engine or a bare host binary bypasses policy and is unsupported.
 
 The launcher rejects interactive, printing, macro, scripting, and server modes before starting LibreOffice; forces non-interactive flags; isolates configuration in a disposable profile; disables macro execution, system file dialogs, and printer detection; and accepts only conversion, text-output, version, and help operations. The raw engine remains private because LibreOffice's document filters and renderer still require its shared UI libraries even when no UI is displayed.

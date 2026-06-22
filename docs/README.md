@@ -44,6 +44,5 @@ installRuntimeArchive()
 3. The source runtime manifest is provenance only and lives under `provenance/`.
 4. Published assets are immutable. A changed payload receives a new date-versioned release.
 5. Native payloads are built and execution-tested on their target operating system.
-6. Every ZIP is accompanied by a SHA-256 sidecar.
+6. Every ZIP is accompanied by a SHA-256 sidecar and contains a schema-2 Ed25519-signed exact-tree manifest.
 7. A release is not complete until a clean archive extraction passes deep and executable verification.
-

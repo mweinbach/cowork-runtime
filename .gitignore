@@ -5,3 +5,6 @@ coverage/
 .cache/
 runtime-inputs/
 *.tmp
+keys/*.pem
+!keys/*.pub.pem
+keys/*.key

@@ -30,7 +30,7 @@ function requireString(record: Record<string, unknown>, key: string): string {
 }
 
 export function parseRuntimeManifest(value: unknown): CoworkRuntimeManifest {
-  if (!isRecord(value) || value.schemaVersion !== 1) {
+  if (!isRecord(value) || (value.schemaVersion !== 1 && value.schemaVersion !== 2)) {
     throw new Error("Unsupported or missing Cowork runtime manifest schemaVersion.");
   }
   const asset = requireString(value, "asset");
@@ -112,6 +112,20 @@ export function parseRuntimeManifest(value: unknown): CoworkRuntimeManifest {
     (value.payload.unpackedBytes as number) < 0
   ) {
     throw new Error("Runtime payload fileCount and unpackedBytes must be numbers.");
+  }
+  if (value.schemaVersion === 2) {
+    if (!isRecord(value.integrity)) {
+      throw new Error("Schema-2 runtime manifest integrity object is required.");
+    }
+    if (
+      value.integrity.algorithm !== "Ed25519" ||
+      typeof value.integrity.keyId !== "string" ||
+      !value.integrity.keyId ||
+      value.integrity.manifest !== "runtime-integrity.json" ||
+      value.integrity.signature !== "runtime-integrity.sig"
+    ) {
+      throw new Error("Schema-2 runtime integrity metadata is invalid.");
+    }
   }
 
   return value as CoworkRuntimeManifest;

@@ -59,6 +59,12 @@ If a component moved, appeared, or disappeared, update [`runtime-components.json
 
 ## 4. Stage from scratch
 
+Load the protected release private key before staging. The CLI defaults to key ID `cowork-runtime-release-1`; the matching public key is committed under `keys/`.
+
+```powershell
+$env:COWORK_RUNTIME_SIGNING_KEY_FILE = "$env:RUNNER_TEMP\cowork-runtime-release-1.pem"
+```
+
 ```powershell
 bun run stage -- `
   --source $Source `
@@ -144,3 +150,4 @@ Run `bun run check`, review `git status`, then follow [Release and rollback](rel
 - [ ] Clean installer extraction passes.
 - [ ] Representative document/PDF/presentation/spreadsheet flows pass.
 - [ ] ZIP and SHA-256 sidecar are attached to the matching release tag.
+- [ ] Schema-2 signature and exact-tree verification pass with the pinned release public key.

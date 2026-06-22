@@ -5,6 +5,7 @@
 - One tag per ISO date: `runtime-YYYY-MM-DD`.
 - Stable asset names within that tag.
 - One `.sha256` sidecar per ZIP.
+- One application-pinned Ed25519 signing identity; the private key is supplied only by the protected release environment.
 - Only verified platform assets are published.
 - Published bytes are immutable.
 
@@ -15,13 +16,14 @@
 For every platform asset:
 
 1. `bun run check` passes.
-2. Staged payload passes `verify --deep --execute` on the target OS.
-3. ZIP build completes and produces a checksum.
-4. Clean installer extraction passes `verify --deep --execute`.
-5. Generated launchers execute from the installed path.
-6. Representative artifact workflows pass.
-7. Component provenance and dependency recipes are current.
-8. License and notice files have been reviewed.
+2. `COWORK_RUNTIME_SIGNING_KEY_FILE` is present, private, and matches the repository public key.
+3. Staged schema-2 payload passes signature, exact-tree, `verify --deep --execute` checks on the target OS.
+4. ZIP build completes and produces a checksum.
+5. Clean installer extraction repeats signature, exact-tree, and executable verification.
+6. Generated launchers execute from the installed path.
+7. Representative artifact workflows pass.
+8. Component provenance and dependency recipes are current.
+9. License and notice files have been reviewed.
 
 ## Publish
 
@@ -48,7 +50,7 @@ Download into a clean directory instead of trusting the upload response:
 gh release download runtime-2026-07-01 --dir release-smoke
 ```
 
-Compare the downloaded checksum sidecar, then install from the downloaded archive into a temporary home and repeat deep executable verification.
+Compare the downloaded checksum sidecar, then install from the downloaded archive into a temporary home and repeat signature, exact-tree, and deep executable verification using the pinned public key.
 
 Also exercise the GitHub download path used by consumers:
 

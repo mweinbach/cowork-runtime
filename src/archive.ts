@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, createPublicKey, randomUUID } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -8,6 +8,7 @@ import { ZipArchive } from "archiver";
 import yauzl, { type Entry, type ZipFile } from "yauzl";
 
 import { readRuntimeManifest } from "./manifest";
+import { writeRuntimeIntegrity, type RuntimeKeyMaterial } from "./integrity";
 import { verifyRuntime } from "./runtime";
 
 const MAX_ARCHIVE_ENTRIES = 200_000;
@@ -100,11 +101,28 @@ export async function buildRuntimeArchive(opts: {
   runtimeDir: string;
   outputFile?: string;
   compressionLevel?: number;
+  signingKey: { keyId: string; privateKey: RuntimeKeyMaterial };
   log?: (line: string) => void;
 }): Promise<{ archivePath: string; checksumPath: string; sha256: string; bytes: number }> {
   const runtimeDir = path.resolve(opts.runtimeDir);
   const manifest = await readRuntimeManifest(runtimeDir);
-  const verification = await verifyRuntime({ runtimeDir, deep: true });
+  if (manifest.schemaVersion !== 2 || manifest.integrity?.keyId !== opts.signingKey.keyId) {
+    throw new Error("Runtime signing key does not match the schema-2 runtime manifest.");
+  }
+  await writeRuntimeIntegrity({
+    root: runtimeDir,
+    manifest,
+    privateKey: opts.signingKey.privateKey,
+  });
+  const publicKey = createPublicKey(opts.signingKey.privateKey).export({
+    format: "pem",
+    type: "spki",
+  });
+  const verification = await verifyRuntime({
+    runtimeDir,
+    deep: true,
+    trustedKeys: { [opts.signingKey.keyId]: publicKey },
+  });
   if (!verification.ok) {
     throw new Error(`Runtime verification failed:\n${verification.errors.join("\n")}`);
   }

@@ -1,21 +1,51 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { execFile } from "node:child_process";
+import { generateKeyPairSync } from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
-import { buildRuntimeArchive } from "../src/archive";
+import { buildRuntimeArchive as buildRuntimeArchiveImpl } from "../src/archive";
 import {
-  installRuntimeArchive,
+  installRuntimeArchive as installRuntimeArchiveImpl,
   listInstalledRuntimes,
   resolveCurrentRuntime,
 } from "../src/install";
 import { readRuntimeManifest } from "../src/manifest";
-import { buildRuntimeEnv, stageRuntime, verifyRuntime } from "../src/runtime";
+import {
+  buildRuntimeEnv as buildRuntimeEnvImpl,
+  stageRuntime as stageRuntimeImpl,
+  verifyRuntime as verifyRuntimeImpl,
+} from "../src/runtime";
 
 const temporaryRoots: string[] = [];
 const execFileAsync = promisify(execFile);
+const TEST_KEY_ID = "runtime-pipeline-test";
+const TEST_KEY_PAIR = generateKeyPairSync("ed25519", {
+  privateKeyEncoding: { format: "pem", type: "pkcs8" },
+  publicKeyEncoding: { format: "pem", type: "spki" },
+});
+const signingKey = { keyId: TEST_KEY_ID, privateKey: TEST_KEY_PAIR.privateKey };
+const trustedKeys = { [TEST_KEY_ID]: TEST_KEY_PAIR.publicKey };
+
+const stageRuntime = (
+  opts: Omit<Parameters<typeof stageRuntimeImpl>[0], "signingKey">,
+) => stageRuntimeImpl({ ...opts, signingKey });
+const buildRuntimeArchive = (
+  opts: Omit<Parameters<typeof buildRuntimeArchiveImpl>[0], "signingKey">,
+) => buildRuntimeArchiveImpl({ ...opts, signingKey });
+const installRuntimeArchive = (
+  opts: Omit<Parameters<typeof installRuntimeArchiveImpl>[0], "trustedKeys">,
+) => installRuntimeArchiveImpl({ ...opts, trustedKeys });
+const verifyRuntime = (
+  opts: Omit<Parameters<typeof verifyRuntimeImpl>[0], "trustedKeys">,
+) => verifyRuntimeImpl({ ...opts, trustedKeys });
+const buildRuntimeEnv = (
+  runtimeDir: string,
+  baseEnv?: Record<string, string | undefined>,
+  platform?: NodeJS.Platform,
+) => buildRuntimeEnvImpl(runtimeDir, baseEnv, platform, trustedKeys);
 
 async function tempRoot(label: string): Promise<string> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), `cowork-runtime-${label}-`));
@@ -264,7 +294,7 @@ describe("unified runtime pipeline", () => {
       "pnpm.mjs --version",
     );
     expect(await fs.readFile(path.join(installed.runtimeDir, "cowork", "node-resolver", "hooks.mjs"), "utf8"))
-      .toContain("if (!runtimeParentURL || !isBareSpecifier(specifier))");
+      .toContain("runtimeParentURLs.length === 0");
   });
 
   test("stages components, builds a release, and installs by date", async () => {
@@ -343,6 +373,7 @@ describe("unified runtime pipeline", () => {
     );
     expect(env.COWORK_RUNTIME_DIR).toBe(staged);
     expect(env.COWORK_RUNTIME_NODE_MODULES).toContain(path.join("dependencies", "node", "node_modules"));
+    expect(env.NODE_PATH).toContain(path.join("node_modules", ".pnpm", "node_modules"));
     expect(env.COWORK_RUNTIME_SOFFICE).toBe(path.join(staged, "dependencies", "bin", "soffice.exe"));
     expect(env.COWORK_RUNTIME_POPPLER_BIN).toBe(
       path.join(staged, "dependencies", "native", "poppler", "Library", "bin"),

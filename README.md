@@ -29,12 +29,12 @@ Each release uses an ISO-date version and a stable asset name:
 | Linux x64 | `cowork-runtime-linux-x86.zip` | Payload to be assembled later. |
 | Linux ARM64 | `cowork-runtime-linux-arm64.zip` | Payload to be assembled later. |
 
-For version `2026-06-21`, the expected release tag is `runtime-2026-06-21`. Every ZIP has a sibling `.sha256` asset.
+For version `2026-06-22`, the expected release tag is `runtime-2026-06-22`. Every ZIP has a sibling `.sha256` asset. Every payload also contains an Ed25519-signed schema-2 integrity manifest covering the exact file set, sizes, hashes, components, and entrypoints.
 
 Installation is checksum-verified, extracted into a temporary directory, validated, then atomically promoted to:
 
 ```text
-~/.cowork/runtime/2026-06-21/
+~/.cowork/runtime/2026-06-22/
 ```
 
 `~/.cowork/runtime/current.json` selects the active version. There is no mutable `current/` directory or platform-dependent symlink.
@@ -77,13 +77,19 @@ Prepare the checksum-pinned LibreOffice component on the target operating system
 bun run prepare:libreoffice -- --asset win-x86 --force
 ```
 
+Provide the release signing key through a private file. The public key under [`keys/`](keys/) is pinned by consumers; the private key must never enter the repository or build artifacts:
+
+```powershell
+$env:COWORK_RUNTIME_SIGNING_KEY_FILE = "$env:RUNNER_TEMP\cowork-runtime-release-1.pem"
+```
+
 Assemble from the current OpenAI reference runtime:
 
 ```powershell
 bun run stage -- `
   --source "$env:USERPROFILE\.cache\codex-runtimes\codex-primary-runtime" `
   --asset win-x86 `
-  --version 2026-06-21 `
+  --version 2026-06-22 `
   --force
 ```
 
@@ -115,7 +121,7 @@ bun run prepare:libreoffice -- --asset macos-arm64 --force
 bun run stage -- \
   --source "$HOME/.cache/codex-runtimes/codex-primary-runtime" \
   --asset macos-arm64 \
-  --version 2026-06-21 \
+  --version 2026-06-22 \
   --component-plan recipes/macos-arm64/runtime-components.json \
   --force
 bun run verify -- --runtime payloads/macos-arm64 --deep --execute
@@ -137,31 +143,31 @@ bun src/cli.ts install `
   --home "$env:TEMP\cowork-runtime-smoke"
 
 bun src/cli.ts verify `
-  --runtime "$env:TEMP\cowork-runtime-smoke\.cowork\runtime\2026-06-21" `
+  --runtime "$env:TEMP\cowork-runtime-smoke\.cowork\runtime\2026-06-22" `
   --deep `
   --execute
 ```
 
 Install to the real Cowork home by omitting `--home`.
 
-On macOS, use an isolated home such as `$TMPDIR/cowork-runtime-smoke` and the `cowork-runtime-macos-arm64` asset names, then run the same deep executable verification against its installed `2026-06-21` directory.
+On macOS, use an isolated home such as `$TMPDIR/cowork-runtime-smoke` and the `cowork-runtime-macos-arm64` asset names, then run the same deep executable verification against its installed `2026-06-22` directory.
 
 ## Publish a GitHub release
 
 Once this repository has a GitHub remote and the ZIP has passed the local install smoke test:
 
 ```powershell
-gh release create runtime-2026-06-21 `
+gh release create runtime-2026-06-22 `
   dist/cowork-runtime-win-x86.zip `
   dist/cowork-runtime-win-x86.zip.sha256 `
-  --title "Cowork Runtime 2026-06-21" `
+  --title "Cowork Runtime 2026-06-22" `
   --notes "Windows x86-64 runtime; Windows ARM64 uses x64 emulation."
 ```
 
 During private release preparation only, before any consumer can have installed the asset, a corrected upload can be replaced with:
 
 ```powershell
-gh release upload runtime-2026-06-21 `
+gh release upload runtime-2026-06-22 `
   dist/cowork-runtime-win-x86.zip `
   dist/cowork-runtime-win-x86.zip.sha256 `
   --clobber
@@ -176,7 +182,7 @@ The reusable library exports release selection, download, safe extraction, verif
 ```powershell
 bun src/cli.ts download `
   --repo owner/cowork-runtime `
-  --version 2026-06-21
+  --version 2026-06-22
 ```
 
 The runtime environment exposes a single namespace:
@@ -188,6 +194,7 @@ COWORK_RUNTIME_ASSET
 COWORK_RUNTIME_BIN
 COWORK_RUNTIME_NODE
 COWORK_RUNTIME_PYTHON
+COWORK_RUNTIME_GIT
 COWORK_RUNTIME_NODE_MODULES
 COWORK_RUNTIME_NODE_RESOLVER
 COWORK_RUNTIME_POPPLER_BIN
@@ -196,7 +203,7 @@ COWORK_RUNTIME_LIBREOFFICE_DIR
 COWORK_RUNTIME_LIBREOFFICE_BINARY
 ```
 
-It also prepares `PATH`, `NODE_PATH`, and a Node `--import` resolver hook so marketplace skill builders in writable scratch directories can directly import managed packages such as `@oai/artifact-tool`.
+It also prepares `PATH`, exposes both the top-level and pnpm-hoisted package closure through `NODE_PATH`, and adds a Node `--import` resolver hook so marketplace skill builders in writable scratch directories can directly import managed packages such as `@oai/artifact-tool`.
 
 ## Skills marketplace boundary
 
@@ -226,7 +233,9 @@ On Windows, interactive module launchers such as `soffice.exe`, `swriter.exe`, a
 
 ## Safety properties
 
-- SHA-256 is verified before extraction.
+- The archive SHA-256 is verified before extraction.
+- A schema-2 Ed25519 signature authenticates the exact extracted file tree; schema-1 runtimes are diagnostics-only.
+- Complete-tree verification runs before installation, entrypoints are re-hashed before use, and consumer mutation watchers invalidate cached component trust.
 - ZIP entries are bounded by count and unpacked size.
 - Absolute paths, traversal paths, duplicate paths, unsafe links, and special filesystem entries are rejected.
 - Installation uses a staging directory and atomic promotion.

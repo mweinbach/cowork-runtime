@@ -42,12 +42,13 @@ The server should:
 1. Resolve the Cowork auth home and runtime root.
 2. Select the correct release asset for the host.
 3. Download/install outside an active model turn when possible.
-4. Verify before activation.
+4. Verify schema 2, its Ed25519 signature, and the complete exact tree before activation; schema 1 is diagnostics-only.
 5. Build a scoped environment for shell/tool subprocesses.
 6. Independently ensure marketplace plugins through the normal user/project plugin installer.
 7. Keep the installed runtime read-only; artifact outputs and temporary profiles belong in normal writable workspace/scratch roots.
 8. Expose status, diagnostics, install, and activation over JSON-RPC.
 9. Log versions and verification results without logging credentials or signed URLs.
+10. Verify direct entrypoint closures on every use and invalidate cached component trust when the recursive runtime watcher observes a mutation or overflows.
 
 The desktop UI should not download archives, mutate `current.json`, select binaries, or implement fallback logic.
 

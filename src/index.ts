@@ -3,6 +3,7 @@ export * from "./download";
 export * from "./install";
 export * from "./libreoffice";
 export * from "./manifest";
+export * from "./integrity";
 export * from "./platform";
 export * from "./runtime";
 export * from "./types";
