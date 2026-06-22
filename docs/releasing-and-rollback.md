@@ -13,6 +13,16 @@
 
 ## Pre-release gate
 
+GitHub release jobs receive the signing identity through the encrypted
+`COWORK_RUNTIME_SIGNING_PRIVATE_KEY` repository secret and the non-secret
+`COWORK_RUNTIME_SIGNING_KEY_ID` repository variable. Run the **Runtime Release
+Signing Preflight** workflow before a release build. It maps the secret into the
+job environment, materializes `COWORK_RUNTIME_SIGNING_KEY_FILE` under
+`RUNNER_TEMP` with mode `0600`, verifies that it derives the public key committed
+under `keys/`, and deletes the temporary file even on failure. Build/signing
+steps must consume `COWORK_RUNTIME_SIGNING_KEY_FILE`; they must never echo or
+persist the multiline private-key environment value.
+
 For every platform asset:
 
 1. `bun run check` passes.

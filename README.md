@@ -83,6 +83,13 @@ Provide the release signing key through a private file. The public key under [`k
 $env:COWORK_RUNTIME_SIGNING_KEY_FILE = "$env:RUNNER_TEMP\cowork-runtime-release-1.pem"
 ```
 
+In GitHub Actions, the private PEM is stored as the encrypted
+`COWORK_RUNTIME_SIGNING_PRIVATE_KEY` repository secret and the key ID as the
+`COWORK_RUNTIME_SIGNING_KEY_ID` repository variable. The **Runtime Release
+Signing Preflight** workflow securely materializes the file, proves it matches
+the pinned public key, exports `COWORK_RUNTIME_SIGNING_KEY_FILE` for subsequent
+release steps, and removes it in an `always()` cleanup step.
+
 Assemble from the current OpenAI reference runtime:
 
 ```powershell
