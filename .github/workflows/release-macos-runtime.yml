@@ -1,0 +1,217 @@
+name: Publish macOS Runtime
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: ISO runtime version already used by the target release
+        required: true
+        default: "2026-06-22"
+      staging_tag:
+        description: Private draft release containing the staging-signed macOS assets
+        required: true
+      release_tag:
+        description: Existing public multi-platform runtime release
+        required: true
+        default: runtime-2026-06-22
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-macos-runtime-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  publish-macos-arm64:
+    name: Verify and publish macOS ARM64
+    runs-on: macos-15
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+      COWORK_RUNTIME_SIGNING_KEY_ID: ${{ vars.COWORK_RUNTIME_SIGNING_KEY_ID }}
+      RUNTIME_ASSET: macos-arm64
+      STAGING_KEY_ID: cowork-runtime-staging
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Validate release inputs and runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ inputs.version }}"
+          staging_tag="${{ inputs.staging_tag }}"
+          release_tag="${{ inputs.release_tag }}"
+          [[ "$version" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]
+          test "$release_tag" = "runtime-$version"
+          test "$staging_tag" = "runtime-staging-macos-arm64-$version"
+          test "$(uname -m)" = "arm64"
+          test -n "${COWORK_RUNTIME_SIGNING_KEY_ID:-}"
+
+          staging_json="$(gh release view "$staging_tag" --json isDraft,assets)"
+          test "$(jq -r .isDraft <<<"$staging_json")" = "true"
+          for name in \
+            cowork-runtime-macos-arm64.zip \
+            cowork-runtime-macos-arm64.zip.sha256 \
+            cowork-runtime-staging.pub.pem; do
+            jq -e --arg name "$name" '.assets[] | select(.name == $name)' <<<"$staging_json" >/dev/null
+          done
+
+          release_json="$(gh release view "$release_tag" --json isDraft,assets)"
+          test "$(jq -r .isDraft <<<"$release_json")" = "false"
+          for name in cowork-runtime-macos-arm64.zip cowork-runtime-macos-arm64.zip.sha256; do
+            if jq -e --arg name "$name" '.assets[] | select(.name == $name)' <<<"$release_json" >/dev/null; then
+              echo "Refusing to replace immutable published asset: $name" >&2
+              exit 1
+            fi
+          done
+
+      - name: Materialize and verify production signing key
+        shell: bash
+        env:
+          COWORK_RUNTIME_SIGNING_PRIVATE_KEY: ${{ secrets.COWORK_RUNTIME_SIGNING_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "${COWORK_RUNTIME_SIGNING_PRIVATE_KEY:-}"
+          umask 077
+          key_file="$RUNNER_TEMP/${COWORK_RUNTIME_SIGNING_KEY_ID}.pem"
+          printf '%s' "$COWORK_RUNTIME_SIGNING_PRIVATE_KEY" > "$key_file"
+          chmod 600 "$key_file"
+          echo "COWORK_RUNTIME_SIGNING_KEY_FILE=$key_file" >> "$GITHUB_ENV"
+
+          PRIVATE_KEY_FILE="$key_file" node --input-type=module <<'NODE'
+          import { createPrivateKey, createPublicKey, timingSafeEqual } from "node:crypto";
+          import fs from "node:fs";
+          import path from "node:path";
+
+          const keyId = process.env.COWORK_RUNTIME_SIGNING_KEY_ID;
+          const privateKeyFile = process.env.PRIVATE_KEY_FILE;
+          if (!keyId || !privateKeyFile) throw new Error("Signing key environment is incomplete");
+          const expected = createPublicKey(
+            fs.readFileSync(path.join("keys", `${keyId}.pub.pem`)),
+          ).export({ format: "der", type: "spki" });
+          const actual = createPublicKey(
+            createPrivateKey(fs.readFileSync(privateKeyFile)),
+          ).export({ format: "der", type: "spki" });
+          if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) {
+            throw new Error("GitHub release signing secret does not match the pinned public key");
+          }
+          NODE
+
+      - name: Download and verify staging-signed runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p staging
+          gh release download "${{ inputs.staging_tag }}" \
+            --dir staging \
+            --pattern cowork-runtime-macos-arm64.zip \
+            --pattern cowork-runtime-macos-arm64.zip.sha256 \
+            --pattern cowork-runtime-staging.pub.pem
+          bun src/cli.ts install \
+            --archive staging/cowork-runtime-macos-arm64.zip \
+            --checksum staging/cowork-runtime-macos-arm64.zip.sha256 \
+            --home "$RUNNER_TEMP/staging-home" \
+            --public-key staging/cowork-runtime-staging.pub.pem \
+            --key-id "$STAGING_KEY_ID"
+          rm -f staging/cowork-runtime-macos-arm64.zip
+
+      - name: Re-seal and verify with the production identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          runtime_dir="$RUNNER_TEMP/staging-home/.cowork/runtime/${{ inputs.version }}"
+          bun src/cli.ts reseal \
+            --runtime "$runtime_dir" \
+            --source-public-key staging/cowork-runtime-staging.pub.pem \
+            --source-key-id "$STAGING_KEY_ID" \
+            --signing-key "$COWORK_RUNTIME_SIGNING_KEY_FILE" \
+            --key-id "$COWORK_RUNTIME_SIGNING_KEY_ID" \
+            --asset "$RUNTIME_ASSET" \
+            --version "${{ inputs.version }}"
+          bun src/cli.ts verify \
+            --runtime "$runtime_dir" \
+            --public-key "keys/${COWORK_RUNTIME_SIGNING_KEY_ID}.pub.pem" \
+            --key-id "$COWORK_RUNTIME_SIGNING_KEY_ID" \
+            --deep \
+            --execute
+          bun src/cli.ts build \
+            --runtime "$runtime_dir" \
+            --output dist/cowork-runtime-macos-arm64.zip \
+            --signing-key "$COWORK_RUNTIME_SIGNING_KEY_FILE" \
+            --key-id "$COWORK_RUNTIME_SIGNING_KEY_ID"
+
+      - name: Verify a clean install before publication
+        shell: bash
+        run: |
+          set -euo pipefail
+          bun src/cli.ts install \
+            --archive dist/cowork-runtime-macos-arm64.zip \
+            --checksum dist/cowork-runtime-macos-arm64.zip.sha256 \
+            --home "$RUNNER_TEMP/release-home" \
+            --public-key "keys/${COWORK_RUNTIME_SIGNING_KEY_ID}.pub.pem" \
+            --key-id "$COWORK_RUNTIME_SIGNING_KEY_ID"
+          bun src/cli.ts verify \
+            --runtime "$RUNNER_TEMP/release-home/.cowork/runtime/${{ inputs.version }}" \
+            --public-key "keys/${COWORK_RUNTIME_SIGNING_KEY_ID}.pub.pem" \
+            --key-id "$COWORK_RUNTIME_SIGNING_KEY_ID" \
+            --deep \
+            --execute
+
+      - name: Publish immutable macOS assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_json="$(gh release view "${{ inputs.release_tag }}" --json assets)"
+          for name in cowork-runtime-macos-arm64.zip cowork-runtime-macos-arm64.zip.sha256; do
+            if jq -e --arg name "$name" '.assets[] | select(.name == $name)' <<<"$release_json" >/dev/null; then
+              echo "Refusing to replace immutable published asset: $name" >&2
+              exit 1
+            fi
+          done
+          gh release upload "${{ inputs.release_tag }}" \
+            dist/cowork-runtime-macos-arm64.zip \
+            dist/cowork-runtime-macos-arm64.zip.sha256
+
+      - name: Verify the published download path
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "$RUNNER_TEMP/staging-home" "$RUNNER_TEMP/release-home"
+          mkdir -p published
+          gh release download "${{ inputs.release_tag }}" \
+            --dir published \
+            --pattern cowork-runtime-macos-arm64.zip \
+            --pattern cowork-runtime-macos-arm64.zip.sha256
+          bun src/cli.ts install \
+            --archive published/cowork-runtime-macos-arm64.zip \
+            --checksum published/cowork-runtime-macos-arm64.zip.sha256 \
+            --home "$RUNNER_TEMP/published-home" \
+            --public-key "keys/${COWORK_RUNTIME_SIGNING_KEY_ID}.pub.pem" \
+            --key-id "$COWORK_RUNTIME_SIGNING_KEY_ID"
+          bun src/cli.ts verify \
+            --runtime "$RUNNER_TEMP/published-home/.cowork/runtime/${{ inputs.version }}" \
+            --public-key "keys/${COWORK_RUNTIME_SIGNING_KEY_ID}.pub.pem" \
+            --key-id "$COWORK_RUNTIME_SIGNING_KEY_ID" \
+            --deep \
+            --execute
+
+      - name: Delete private staging release
+        shell: bash
+        run: gh release delete "${{ inputs.staging_tag }}" --yes --cleanup-tag
+
+      - name: Remove materialized private key
+        if: always()
+        shell: bash
+        run: |
+          if [ -n "${COWORK_RUNTIME_SIGNING_KEY_FILE:-}" ]; then
+            rm -f -- "$COWORK_RUNTIME_SIGNING_KEY_FILE"
+          fi
