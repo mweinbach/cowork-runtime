@@ -30,5 +30,6 @@ describe("macOS runtime release workflow", () => {
     expect(workflow.match(/--execute/g)).toHaveLength(3);
     expect(workflow).toContain("Verify the published download path");
     expect(workflow).toContain("gh release delete");
+    expect(workflow).not.toContain("--cleanup-tag");
   });
 });
