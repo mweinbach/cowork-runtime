@@ -206,7 +206,7 @@ jobs:
 
       - name: Delete private staging release
         shell: bash
-        run: gh release delete "${{ inputs.staging_tag }}" --yes --cleanup-tag
+        run: gh release delete "${{ inputs.staging_tag }}" --yes
 
       - name: Remove materialized private key
         if: always()
